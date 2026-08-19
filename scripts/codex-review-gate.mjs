@@ -72,6 +72,16 @@ export function retryableGithubStatus(status) {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
+export function codexRequestReactionState(reactions) {
+  const contents = reactions
+    .filter((item) => item?.user?.login === CODEX_BOT_LOGIN)
+    .map((item) => item.content);
+  return {
+    acknowledged: contents.includes("eyes") || contents.includes("+1"),
+    inProgress: contents.includes("eyes"),
+  };
+}
+
 async function githubJson(apiPath, options = {}) {
   const method = options.method ?? "GET";
   const attempts = method === "GET" ? 4 : 1;
@@ -111,7 +121,7 @@ async function githubJson(apiPath, options = {}) {
 
 async function githubPages(apiPath) {
   const values = [];
-  for (let page = 1; page <= 10; page += 1) {
+  for (let page = 1; ; page += 1) {
     const separator = apiPath.includes("?") ? "&" : "?";
     const next = await githubJson(`${apiPath}${separator}per_page=100&page=${page}`);
     if (!Array.isArray(next)) throw new Error("Expected a paginated GitHub API array.");
@@ -146,16 +156,21 @@ async function createReviewRequest(repository, pullNumber, headSha) {
 async function readCompletion(repository, pullNumber, headSha, request) {
   const [reviews, reviewSummaryComments, reviewRequestReactions] = await Promise.all([
     githubPages(`/repos/${repository}/pulls/${pullNumber}/reviews`),
-    githubPages(`/repos/${repository}/issues/${pullNumber}/comments`),
+    githubPages(
+      `/repos/${repository}/issues/${pullNumber}/comments?since=${encodeURIComponent(request.createdAt)}`,
+    ),
     githubPages(`/repos/${repository}/issues/comments/${request.id}/reactions`),
   ]);
-  return detectCodexCompletion({
-    reviews,
-    reviewSummaryComments,
-    reviewRequestReactions,
-    headSha,
-    reviewRequestedAt: request.createdAt,
-  });
+  return {
+    completion: detectCodexCompletion({
+      reviews,
+      reviewSummaryComments,
+      reviewRequestReactions,
+      headSha,
+      reviewRequestedAt: request.createdAt,
+    }),
+    requestState: codexRequestReactionState(reviewRequestReactions),
+  };
 }
 
 async function main() {
@@ -166,7 +181,10 @@ async function main() {
   await setStatus(repository, headSha, "pending", "Waiting for Codex review on this commit");
   try {
     const request = await createReviewRequest(repository, pullNumber, headSha);
-    let completion = await readCompletion(repository, pullNumber, headSha, request);
+    let snapshot = await readCompletion(repository, pullNumber, headSha, request);
+    let requestAcknowledged = snapshot.requestState.acknowledged;
+    let settledSamples = 0;
+    let completion = { complete: false, outcome: "pending", completedAt: null };
 
     const timeoutMs = positiveInteger(
       process.env.CODEX_REVIEW_TIMEOUT_MS ?? "1800000",
@@ -178,8 +196,14 @@ async function main() {
     );
     const deadline = Date.now() + timeoutMs;
     while (!completion.complete && Date.now() < deadline) {
+      requestAcknowledged ||= snapshot.requestState.acknowledged;
+      settledSamples = requestAcknowledged && !snapshot.requestState.inProgress
+        ? settledSamples + 1
+        : 0;
+      if (settledSamples >= 2) completion = snapshot.completion;
+      if (completion.complete) break;
       await delay(pollMs);
-      completion = await readCompletion(repository, pullNumber, headSha, request);
+      snapshot = await readCompletion(repository, pullNumber, headSha, request);
     }
     if (!completion.complete) {
       throw new Error("Codex did not finish reviewing the current pull request head in time.");

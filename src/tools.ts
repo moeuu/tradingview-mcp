@@ -79,6 +79,7 @@ const TradingViewExportChartInputSchema = z
     outputName: z.string().min(5).max(124).optional(),
   })
   .strict();
+const StrictEmptyInputSchema = z.object({}).strict();
 
 export function registerTools(server: McpServer, runtime: AppRuntime): void {
   server.registerTool(
@@ -739,7 +740,7 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
       title: "Inspect TradingView Supercharts state",
       description:
         "Read the current official chart URL, symbol, interval, authentication state, and delayed-data flag without exposing cookies.",
-      inputSchema: {},
+      inputSchema: StrictEmptyInputSchema,
       annotations: upstreamRead,
     },
     async () => jsonResult(await runtime.tradingViewBrowser.getState()),
@@ -806,7 +807,7 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
       title: "Close TradingView Supercharts browser",
       description:
         "Close the managed TradingView browser, context, and page. Authentication files remain local and untouched.",
-      inputSchema: {},
+      inputSchema: StrictEmptyInputSchema,
       annotations: localWrite,
     },
     async () => {

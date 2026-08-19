@@ -33,3 +33,10 @@ export function detectCodexCompletion(
 ): CodexReviewGateResult;
 
 export function retryableGithubStatus(status: number): boolean;
+
+export function codexRequestReactionState(
+  reactions: Array<{
+    user?: { login?: string | undefined } | undefined;
+    content?: string | undefined;
+  }>,
+): { acknowledged: boolean; inProgress: boolean };

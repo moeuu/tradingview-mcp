@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CODEX_BOT_LOGIN,
   GITHUB_ACTIONS_BOT_LOGIN,
+  codexRequestReactionState,
   detectCodexCompletion,
   retryableGithubStatus,
 } from "../scripts/codex-review-gate.mjs";
@@ -14,6 +15,23 @@ describe("Codex review gate", () => {
   it("pins the trusted identities used by the gate", () => {
     expect(CODEX_BOT_LOGIN).toBe("chatgpt-codex-connector[bot]");
     expect(GITHUB_ACTIONS_BOT_LOGIN).toBe("github-actions[bot]");
+  });
+
+  it("tracks the current request acknowledgement lifecycle", () => {
+    expect(codexRequestReactionState([])).toEqual({
+      acknowledged: false,
+      inProgress: false,
+    });
+    expect(
+      codexRequestReactionState([
+        { user: { login: CODEX_BOT_LOGIN }, content: "eyes" },
+      ]),
+    ).toEqual({ acknowledged: true, inProgress: true });
+    expect(
+      codexRequestReactionState([
+        { user: { login: CODEX_BOT_LOGIN }, content: "+1" },
+      ]),
+    ).toEqual({ acknowledged: true, inProgress: false });
   });
 
   it("accepts a submitted Codex review only for the current head", () => {

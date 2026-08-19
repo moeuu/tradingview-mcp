@@ -112,6 +112,15 @@ describe("MCP stdio server", () => {
       expect(credentialInjection).toMatchObject({ isError: true });
       expect(JSON.stringify(credentialInjection)).not.toContain("must-not-enter-tool-input");
 
+      const zeroArgumentCredentialInjection = await client.callTool({
+        name: "tradingview_get_state",
+        arguments: { cookie: "must-not-enter-zero-argument-tool" },
+      });
+      expect(zeroArgumentCredentialInjection).toMatchObject({ isError: true });
+      expect(JSON.stringify(zeroArgumentCredentialInjection)).not.toContain(
+        "must-not-enter-zero-argument-tool",
+      );
+
       const initialCapabilities = structuredContent(
         await client.callTool({ name: "market_get_capabilities", arguments: {} }),
       );
