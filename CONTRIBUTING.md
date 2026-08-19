@@ -36,8 +36,17 @@ inline comments when it has suggestions and reacts to the pull request with a
 thumbs-up when it has none. Resolve every review thread before merging. A new
 commit invalidates the previous result and requests another Codex review.
 
-The review gate runs only trusted code from the default branch. It does not
-check out or execute pull request code with its write-scoped workflow token.
+Repository Codex settings request an automatic review for every push. The gate
+observes that review and publishes its commit-specific status. When a clean
+automatic review produces only an ambiguous pull request reaction, the gate
+requests one commit-bound verification. It uses the ephemeral GitHub Actions
+token and requires no personal access token or extra secret. The gate runs only
+trusted code from the default branch and never checks out or executes pull
+request code with its scoped token.
+
+The gate runs when a pull request is opened, marked ready for review, receives a
+new commit, or is retargeted to `main`. A base retarget immediately invalidates
+the previous status and requests a commit-bound review of the new diff.
 
 Repository text must use English and ASCII characters only. This includes
 source strings, tests, documentation, examples, issue templates, and

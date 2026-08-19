@@ -13,18 +13,23 @@ interface CodexReviewGateInput {
     body?: string | undefined;
     created_at?: string | undefined;
   }> | undefined;
-  reviewRequestReactions: Array<{
+  commitBoundReactions?: Array<{
     user?: { login?: string | undefined } | undefined;
     content?: string | undefined;
     created_at?: string | undefined;
-  }>;
+  }> | undefined;
+  pullRequestReactions?: Array<{
+    user?: { login?: string | undefined } | undefined;
+    content?: string | undefined;
+    created_at?: string | undefined;
+  }> | undefined;
   headSha: string;
-  reviewRequestedAt: string;
+  reviewTriggeredAt: string;
 }
 
 interface CodexReviewGateResult {
   complete: boolean;
-  outcome: "review" | "no-suggestions" | "pending";
+  outcome: "review" | "no-suggestions" | "verification-required" | "pending";
   completedAt: string | null;
 }
 
