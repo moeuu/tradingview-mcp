@@ -10,11 +10,14 @@ export function detectCodexCompletion({
   headSha,
   reviewRequestedAt,
 }) {
+  const reviewRequestedMs = Date.parse(reviewRequestedAt);
   const review = reviews.find(
     (item) =>
       item?.user?.login === CODEX_BOT_LOGIN &&
       item.commit_id === headSha &&
-      typeof item.submitted_at === "string",
+      typeof item.submitted_at === "string" &&
+      Number.isFinite(reviewRequestedMs) &&
+      Date.parse(item.submitted_at) >= reviewRequestedMs,
   );
   if (review) {
     return {
@@ -24,7 +27,6 @@ export function detectCodexCompletion({
     };
   }
 
-  const reviewRequestedMs = Date.parse(reviewRequestedAt);
   const reaction = reviewRequestReactions.find(
     (item) =>
       item?.user?.login === CODEX_BOT_LOGIN &&

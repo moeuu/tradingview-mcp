@@ -103,7 +103,7 @@ export function tradingViewLookbackRange(
   );
   return {
     from: addUtcDays(date, -calendarDays),
-    to: addUtcDays(date, 1),
+    to: interval.trim().toUpperCase().endsWith("S") ? date : addUtcDays(date, 1),
   };
 }
 

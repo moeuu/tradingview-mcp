@@ -142,8 +142,9 @@ export const TradingViewDayIntervalSchema = z
     const match = /^(\d+)([SH]?)$/.exec(normalized);
     if (!match) return false;
     const unitSeconds = match[2] === "S" ? 1 : match[2] === "H" ? 3_600 : 60;
-    return Number(match[1]) * unitSeconds <= 86_400;
-  }, "Day lookup interval must not span more than 24 hours.");
+    const durationSeconds = Number(match[1]) * unitSeconds;
+    return durationSeconds >= 9 && durationSeconds <= 86_400;
+  }, "Day lookup interval must span at least 9 seconds and no more than 24 hours.");
 
 export const TradingViewLayoutIdSchema = z
   .string()
@@ -226,7 +227,7 @@ export const TradingViewDayInputSchema = z
     ),
     date: DateOnlySchema.describe("Requested market date in YYYY-MM-DD format."),
     interval: TradingViewDayIntervalSchema.default("D").describe(
-      "D returns the session candle; an intraday interval returns and aggregates every exported bar on that date.",
+      "D returns the session candle; an intraday interval of at least 9 seconds returns and aggregates every exported bar on that date.",
     ),
     timezone: IanaTimezoneSchema.default("UTC").describe(
       "IANA timezone used to decide which exported bars belong to the requested calendar date.",

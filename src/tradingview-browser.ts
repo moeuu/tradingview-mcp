@@ -858,6 +858,7 @@ export class TradingViewBrowserService {
     await this.#assertChartUsable();
     const archived = await this.#downloadChartData(input.outputName);
     const exported = await loadBarsWithFieldsFromCsv(archived.file, this.dataRoot, {
+      allowEmpty: true,
       maximumBytes: MAX_EXPORT_BYTES,
       tailBars: MAX_BARS,
     });
@@ -1041,12 +1042,19 @@ export class TradingViewBrowserService {
     const deadline = Date.now() + this.config.timeoutMs;
     const earliestReady = Date.now() + 750;
     let changed = false;
+    let stableHash: string | undefined;
     let readySamples = 0;
     while (Date.now() < deadline) {
       const currentHash = await this.#chartVisualHash(page);
       changed ||= currentHash !== beforeHash;
       const loading = await this.#chartLoadingVisible(page);
-      readySamples = changed && !loading ? readySamples + 1 : 0;
+      if (changed && !loading) {
+        readySamples = currentHash === stableHash ? readySamples + 1 : 1;
+        stableHash = currentHash;
+      } else {
+        readySamples = 0;
+        stableHash = undefined;
+      }
       if (readySamples >= 2 && Date.now() >= earliestReady) return;
       await page.waitForTimeout(350);
     }

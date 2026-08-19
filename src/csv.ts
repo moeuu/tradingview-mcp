@@ -7,6 +7,7 @@ import { MAX_BARS, normalizeBar, validateBars } from "./domain.js";
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
 
 interface CsvLoadOptions {
+  allowEmpty?: boolean | undefined;
   maximumBytes?: number | undefined;
   tailBars?: number | undefined;
 }
@@ -50,7 +51,7 @@ export async function loadBarsFromCsv(
     throw new Error(`CSV file exceeds the ${maximumBytes}-byte limit.`);
   }
   const source = await readFile(resolved, "utf8");
-  const parsed = parseBarsCsvDetailed(source, options.tailBars);
+  const parsed = parseBarsCsvDetailed(source, options.tailBars, options.allowEmpty);
   return { ...parsed, path: resolved };
 }
 
@@ -102,6 +103,7 @@ export function parseBarsCsv(source: string, options: { tailBars?: number } = {}
 function parseBarsCsvDetailed(
   source: string,
   tailBars: number | undefined,
+  allowEmpty = false,
 ): { bars: Bar[]; sourceBarCount: number; truncated: boolean } {
   if (tailBars !== undefined && (!Number.isSafeInteger(tailBars) || tailBars < 1 || tailBars > MAX_BARS)) {
     throw new Error(`CSV tailBars must be an integer from 1 through ${MAX_BARS}.`);
@@ -114,6 +116,7 @@ function parseBarsCsvDetailed(
     max_record_size: 1_000_000,
   }) as Array<Record<string, unknown>>;
   if (records.length === 0) {
+    if (allowEmpty) return { bars: [], sourceBarCount: 0, truncated: false };
     throw new Error("CSV contains no data rows.");
   }
   if (records.length > MAX_BARS && tailBars === undefined) {

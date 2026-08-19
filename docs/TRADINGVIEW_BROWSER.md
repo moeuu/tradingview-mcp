@@ -36,7 +36,7 @@ For comprehensive data on one historical date:
 tradingview_get_day({symbol:"NASDAQ:AAPL", date:"2024-01-03", interval:"D", timezone:"America/New_York"})
 ```
 
-This uses a bounded Custom range followed by TradingView's documented [chart-data export](https://www.tradingview.com/support/solutions/43000537255-how-to-export-chart-data/). It returns official OHLCV, session aggregation, previous/next bars when loaded, price changes, gaps, range, volume, 5/20/50/200-period performance, deterministic analysis through that date, and every additional indicator column present in the export. `timezone` controls bar-to-calendar-date assignment and must be an IANA timezone. A non-trading or unavailable date returns `status:"no_session_bar"` and does not substitute the nearest bar. Set `includeBars:true` for the individual bars of an intraday date.
+This uses a bounded Custom range followed by TradingView's documented [chart-data export](https://www.tradingview.com/support/solutions/43000537255-how-to-export-chart-data/). It returns official OHLCV, session aggregation, previous/next bars when loaded, price changes, gaps, range, volume, 5/20/50/200-period performance, deterministic analysis through that date, and every additional indicator column present in the export. `timezone` controls bar-to-calendar-date assignment and must be an IANA timezone. A non-trading or unavailable date returns `status:"no_session_bar"` and does not substitute the nearest bar. Set `includeBars:true` for the individual bars of an intraday date. Day aggregation accepts daily bars and intraday intervals from 9 seconds through 24 hours so a complete 24-hour session fits the enforced bar limit.
 
 For deterministic OHLCV retrieval, use the atomic operation:
 

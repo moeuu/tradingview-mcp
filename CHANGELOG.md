@@ -18,7 +18,7 @@ Versioning.
 
 - Preserve complete intraday sessions during date lookup and return `no_session_bar` for wholly unavailable ranges.
 - Wait for observable TradingView chart rendering stability after selecting a Custom range.
-- Reject weekly and monthly intervals from single-day lookup, which cannot identify a specific session.
+- Reject weekly, monthly, multi-day, and sub-nine-second intervals from single-day lookup so one complete session remains representable.
 - Keep normalized CSV export headers globally unique even when generated suffixes collide.
 - Preserve exact-case authentication allowlists, supported TSV HttpOnly markers, and current cookies only.
 - Read authentication files through one verified descriptor and reject files changed during the read.

@@ -73,6 +73,18 @@ describe("parseBarsCsv", () => {
 });
 
 describe("loadBarsFromCsv", () => {
+  it("can represent a header-only official range export when explicitly allowed", async () => {
+    const root = await temporaryDirectory();
+    const csvPath = path.join(root, "empty-range.csv");
+    await writeFile(csvPath, "time,open,high,low,close,volume\n", "utf8");
+
+    const loaded = await loadBarsWithFieldsFromCsv("empty-range.csv", root, {
+      allowEmpty: true,
+    });
+
+    expect(loaded).toMatchObject({ bars: [], rows: [], sourceBarCount: 0, truncated: false });
+  });
+
   it("loads relative and absolute files that resolve inside the configured data root", async () => {
     const root = await temporaryDirectory();
     const nested = path.join(root, "nested");

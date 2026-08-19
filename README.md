@@ -123,7 +123,7 @@ Example calls:
 }
 ```
 
-`tradingview_get_day` returns an explicit `no_session_bar` status for weekends, holidays, and unavailable dates rather than silently substituting a nearby session. On a matching date it returns session OHLCV, previous and next bars when loaded, prior-close and open-gap changes, intraday range, rolling 5/20/50/200-period performance, deterministic indicators and signals, and every additional indicator column present in the official TradingView chart export. Set an intraday `interval` and `includeBars:true` to receive all exported bars assigned to that date.
+`tradingview_get_day` returns an explicit `no_session_bar` status for weekends, holidays, and unavailable dates rather than silently substituting a nearby session. On a matching date it returns session OHLCV, previous and next bars when loaded, prior-close and open-gap changes, intraday range, rolling 5/20/50/200-period performance, deterministic indicators and signals, and every additional indicator column present in the official TradingView chart export. Set an intraday `interval` and `includeBars:true` to receive all exported bars assigned to that date. Day aggregation accepts daily bars and intraday intervals from 9 seconds through 24 hours; shorter seconds intervals could exceed the complete-session safety limit.
 
 High-level TradingView tools close the browser by default. Set `includeBars: true` only when raw bars are required in the MCP response, and `keepBrowserOpen: true` only for immediate follow-up browser tools.
 

@@ -106,5 +106,9 @@ describe("TradingView day context", () => {
       from: "2019-01-29",
       to: "2024-01-04",
     });
+    expect(tradingViewLookbackRange("2024-01-03", "30S", 500)).toEqual({
+      from: "2023-12-24",
+      to: "2024-01-03",
+    });
   });
 });

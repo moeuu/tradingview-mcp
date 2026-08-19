@@ -50,6 +50,23 @@ describe("Codex review gate", () => {
     expect(result).toEqual({ complete: false, outcome: "pending", completedAt: null });
   });
 
+  it("rejects an exact-head review submitted before this gate request", () => {
+    const result = detectCodexCompletion({
+      headSha: HEAD_SHA,
+      reviewRequestedAt: REVIEW_REQUESTED_AT,
+      reviews: [
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          commit_id: HEAD_SHA,
+          submitted_at: "2026-08-19T07:59:59Z",
+        },
+      ],
+      reviewRequestReactions: [],
+    });
+
+    expect(result).toEqual({ complete: false, outcome: "pending", completedAt: null });
+  });
+
   it("accepts a no-suggestions reaction on the head-specific request", () => {
     const result = detectCodexCompletion({
       headSha: HEAD_SHA,
