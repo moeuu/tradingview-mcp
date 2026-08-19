@@ -23,7 +23,9 @@ import {
   TechnicalAnalysisInputSchema,
   TradingViewDayInputSchema,
   TradingViewHistoryInputSchema,
+  TradingViewOpenChartInputSchema,
   TradingViewPeriodScreenshotInputSchema,
+  TradingViewSnapshotInputSchema,
   ViewInputSchema,
   ZoneInputSchema,
 } from "./schemas.js";
@@ -55,7 +57,7 @@ export const TradingViewMcpHistoryInputSchema = TradingViewHistoryInputSchema.ex
     .boolean()
     .default(false)
     .describe("Keep the managed browser alive for follow-up interactive tools."),
-});
+}).strict();
 export const TradingViewAnalyzeInputSchema = TradingViewHistoryInputSchema.omit({
   loadChart: true,
 }).extend({
@@ -67,7 +69,17 @@ export const TradingViewAnalyzeInputSchema = TradingViewHistoryInputSchema.omit(
     .boolean()
     .default(false)
     .describe("Keep the managed browser alive for follow-up interactive tools."),
-});
+}).strict();
+const TradingViewAddIndicatorInputSchema = z
+  .object({ name: z.string().min(1).max(120) })
+  .strict();
+const TradingViewExportChartInputSchema = z
+  .object({
+    loadChart: z.boolean().default(true),
+    outputName: z.string().min(5).max(124).optional(),
+  })
+  .strict();
+const StrictEmptyInputSchema = z.object({}).strict();
 
 export function registerTools(server: McpServer, runtime: AppRuntime): void {
   server.registerTool(
@@ -628,7 +640,7 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
       title: "Get official TradingView OHLCV history",
       description:
         "Open an official TradingView symbol/interval, export chart data through Supercharts, archive the CSV, and return a compact summary by default. Set includeBars only when raw OHLCV must enter model context. The browser closes after the operation unless keepBrowserOpen is true. Supports minute, daily, weekly, and monthly intervals. No account upgrade action is attempted.",
-      inputSchema: TradingViewMcpHistoryInputSchema.shape,
+      inputSchema: TradingViewMcpHistoryInputSchema,
       annotations: upstreamWrite,
     },
     async (raw: unknown) => {
@@ -645,7 +657,7 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
       title: "Analyze an official TradingView symbol",
       description:
         "Recommended one-call workflow: fetch and archive official TradingView OHLCV, load it into the local chart, and return deterministic technical analysis with source and delay metadata. The browser closes afterward unless keepBrowserOpen is true.",
-      inputSchema: TradingViewAnalyzeInputSchema.shape,
+      inputSchema: TradingViewAnalyzeInputSchema,
       annotations: upstreamWrite,
     },
     async (raw: unknown) => {
@@ -666,7 +678,7 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
       title: "Get comprehensive TradingView data for one date",
       description:
         "Recommended one-call historical-date workflow. Navigate official TradingView Supercharts to the requested date, export OHLCV through the chart UI, and return the matching session or intraday aggregate, prior/next bars when available, price changes, gaps, ranges, volume, rolling performance, and deterministic technical analysis. Non-trading days return an explicit no_session_bar status instead of substituting another date.",
-      inputSchema: TradingViewDayInputSchema.shape,
+      inputSchema: TradingViewDayInputSchema,
       annotations: upstreamWrite,
     },
     async (raw: unknown) => {
@@ -681,7 +693,7 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
       title: "Capture a TradingView chart for an exact date range",
       description:
         "Open an official TradingView symbol and interval, use the Supercharts Custom range control for the requested YYYY-MM-DD dates, and return the resulting chart as a PNG in one call. The browser closes by default and authentication remains local.",
-      inputSchema: TradingViewPeriodScreenshotInputSchema.shape,
+      inputSchema: TradingViewPeriodScreenshotInputSchema,
       annotations: upstreamRead,
     },
     async (raw: unknown) => {
@@ -713,21 +725,11 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
       title: "Open TradingView Supercharts",
       description:
         "Open the official TradingView Supercharts UI for a validated symbol and interval. Optional authentication is loaded only from the configured local state/cookie file and is never returned.",
-      inputSchema: {
-        symbol: z.string().min(1).max(100),
-        interval: z.string().min(1).max(10).default("240"),
-        layoutId: z.string().min(4).max(40).optional(),
-      },
+      inputSchema: TradingViewOpenChartInputSchema,
       annotations: upstreamWrite,
     },
     async (raw: unknown) => {
-      const input = z
-        .object({
-          symbol: z.string().min(1).max(100),
-          interval: z.string().min(1).max(10).default("240"),
-          layoutId: z.string().min(4).max(40).optional(),
-        })
-        .parse(raw);
+      const input = TradingViewOpenChartInputSchema.parse(raw);
       return jsonResult(await runtime.tradingViewBrowser.openChart(input));
     },
   );
@@ -738,7 +740,7 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
       title: "Inspect TradingView Supercharts state",
       description:
         "Read the current official chart URL, symbol, interval, authentication state, and delayed-data flag without exposing cookies.",
-      inputSchema: {},
+      inputSchema: StrictEmptyInputSchema,
       annotations: upstreamRead,
     },
     async () => jsonResult(await runtime.tradingViewBrowser.getState()),
@@ -750,11 +752,11 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
       title: "Add a TradingView indicator",
       description:
         "Use the official Supercharts indicator dialog to add an exact built-in or user-visible indicator by name.",
-      inputSchema: { name: z.string().min(1).max(120) },
+      inputSchema: TradingViewAddIndicatorInputSchema,
       annotations: upstreamWrite,
     },
     async (raw: unknown) => {
-      const { name } = z.object({ name: z.string().min(1).max(120) }).parse(raw);
+      const { name } = TradingViewAddIndicatorInputSchema.parse(raw);
       return jsonResult(await runtime.tradingViewBrowser.addIndicator(name));
     },
   );
@@ -765,16 +767,11 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
       title: "Export TradingView chart data",
       description:
         "Download the data currently loaded in official Supercharts through its chart-data export UI, including visible indicator columns. Optionally load OHLCV into the local chart for deterministic analysis.",
-      inputSchema: {
-        loadChart: z.boolean().default(true),
-        outputName: z.string().min(5).max(124).optional(),
-      },
+      inputSchema: TradingViewExportChartInputSchema,
       annotations: upstreamWrite,
     },
     async (raw: unknown) => {
-      const input = z
-        .object({ loadChart: z.boolean().default(true), outputName: z.string().min(5).max(124).optional() })
-        .parse(raw);
+      const input = TradingViewExportChartInputSchema.parse(raw);
       return jsonResult(await runtime.tradingViewBrowser.exportChartData(input));
     },
   );
@@ -785,21 +782,11 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
       title: "Capture TradingView Supercharts",
       description:
         "Capture the official TradingView chart region or viewport for visual analysis. Authentication details are excluded from the result.",
-      inputSchema: {
-        width: z.number().int().min(640).max(2_560).default(1_440),
-        height: z.number().int().min(480).max(1_800).default(900),
-        chartOnly: z.boolean().default(true),
-      },
+      inputSchema: TradingViewSnapshotInputSchema,
       annotations: upstreamRead,
     },
     async (raw: unknown) => {
-      const input = z
-        .object({
-          width: z.number().int().min(640).max(2_560).default(1_440),
-          height: z.number().int().min(480).max(1_800).default(900),
-          chartOnly: z.boolean().default(true),
-        })
-        .parse(raw);
+      const input = TradingViewSnapshotInputSchema.parse(raw);
       const [png, state] = await Promise.all([
         runtime.tradingViewBrowser.snapshot(input),
         runtime.tradingViewBrowser.getState(),
@@ -820,7 +807,7 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
       title: "Close TradingView Supercharts browser",
       description:
         "Close the managed TradingView browser, context, and page. Authentication files remain local and untouched.",
-      inputSchema: {},
+      inputSchema: StrictEmptyInputSchema,
       annotations: localWrite,
     },
     async () => {
@@ -879,7 +866,12 @@ export async function getTradingViewDayForMcp(
       ...requestedRange,
       bars: lookbackBars,
     });
-    return buildTradingViewDayContext(history, { date, timezone, includeBars });
+    return buildTradingViewDayContext(history, {
+      date,
+      timezone,
+      includeBars,
+      lookbackBars,
+    });
   } finally {
     if (!keepBrowserOpen) await browser.close();
   }

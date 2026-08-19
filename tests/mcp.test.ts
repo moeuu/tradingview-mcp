@@ -51,7 +51,7 @@ describe("MCP stdio server", () => {
 
       expect(client.getServerVersion()).toMatchObject({
         name: "tradingview-mcp",
-        version: "0.4.0",
+        version: "0.4.1",
       });
       expect(client.getInstructions()).toContain("tradingview_get_day");
       expect(client.getInstructions()).toContain("start on demand");
@@ -100,6 +100,26 @@ describe("MCP stdio server", () => {
         },
         required: expect.arrayContaining(["symbol", "from", "to"]),
       });
+      expect(historyTool?.inputSchema).toMatchObject({ additionalProperties: false });
+
+      const credentialInjection = await client.callTool({
+        name: "tradingview_get_history",
+        arguments: {
+          symbol: "NASDAQ:AAPL",
+          cookie: "must-not-enter-tool-input",
+        },
+      });
+      expect(credentialInjection).toMatchObject({ isError: true });
+      expect(JSON.stringify(credentialInjection)).not.toContain("must-not-enter-tool-input");
+
+      const zeroArgumentCredentialInjection = await client.callTool({
+        name: "tradingview_get_state",
+        arguments: { cookie: "must-not-enter-zero-argument-tool" },
+      });
+      expect(zeroArgumentCredentialInjection).toMatchObject({ isError: true });
+      expect(JSON.stringify(zeroArgumentCredentialInjection)).not.toContain(
+        "must-not-enter-zero-argument-tool",
+      );
 
       const initialCapabilities = structuredContent(
         await client.callTool({ name: "market_get_capabilities", arguments: {} }),

@@ -7,6 +7,24 @@ Versioning.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-19
+
+### Added
+
+- A commit-specific GitHub status gate that waits for Codex review completion before a pull request can merge.
+- Explicit source metadata showing whether the requested TradingView analysis lookback was fully available.
+
+### Fixed
+
+- Preserve complete intraday sessions during date lookup and return `no_session_bar` for wholly unavailable ranges.
+- Wait for observable TradingView chart rendering stability after selecting a Custom range.
+- Reject weekly, monthly, multi-day, and sub-nine-second intervals from single-day lookup so one complete session remains representable.
+- Keep normalized CSV export headers globally unique even when generated suffixes collide.
+- Preserve exact-case authentication allowlists, supported TSV HttpOnly markers, and current cookies only.
+- Read authentication files through one verified descriptor and reject files changed during the read.
+- Reject undeclared fields, including credential-like fields, from every TradingView MCP tool input.
+- Recognize TradingView's centered-dot primary-symbol label during capture audits.
+
 ## [0.4.0] - 2026-08-19
 
 ### Added
@@ -51,7 +69,8 @@ Versioning.
 - Generalized defaults, examples, paths, and documentation for public use.
 - Updated production and development dependencies.
 
-[Unreleased]: https://github.com/moeuu/tradingview-mcp/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/moeuu/tradingview-mcp/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/moeuu/tradingview-mcp/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/moeuu/tradingview-mcp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/moeuu/tradingview-mcp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/moeuu/tradingview-mcp/releases/tag/v0.2.0

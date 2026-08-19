@@ -60,6 +60,40 @@ describe("MCP TradingView workflows", () => {
         to: "2024-01-01",
       }),
     ).toThrow(/end date/i);
+    expect(() =>
+      TradingViewDayInputSchema.parse({
+        symbol: "NASDAQ:AAPL",
+        date: "2024-02-01",
+        interval: "W",
+      }),
+    ).toThrow(/daily, seconds, minutes, or hours/i);
+    for (const interval of ["2880", "48H"]) {
+      expect(() =>
+        TradingViewDayInputSchema.parse({
+          symbol: "NASDAQ:AAPL",
+          date: "2024-02-01",
+          interval,
+        }),
+      ).toThrow(/24 hours/i);
+    }
+    for (const interval of ["1S", "5S"]) {
+      expect(() =>
+        TradingViewDayInputSchema.parse({
+          symbol: "NASDAQ:AAPL",
+          date: "2024-02-01",
+          interval,
+        }),
+      ).toThrow(/at least 9 seconds/i);
+    }
+    for (const interval of ["9S", "30S", "9999S", "1440", "24H"]) {
+      expect(
+        TradingViewDayInputSchema.parse({
+          symbol: "NASDAQ:AAPL",
+          date: "2024-02-01",
+          interval,
+        }).interval,
+      ).toBe(interval);
+    }
   });
 
   it("returns compact history and closes the browser by default", async () => {

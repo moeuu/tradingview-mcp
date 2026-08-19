@@ -30,6 +30,15 @@ Before opening a pull request:
    market data, or machine-specific paths are included.
 4. Explain the user-visible behavior and verification performed.
 
+The required `codex-review` status remains pending until Codex has completed a
+review of the pull request's current head commit. Codex submits a review with
+inline comments when it has suggestions and reacts to the pull request with a
+thumbs-up when it has none. Resolve every review thread before merging. A new
+commit invalidates the previous result and requests another Codex review.
+
+The review gate runs only trusted code from the default branch. It does not
+check out or execute pull request code with its write-scoped workflow token.
+
 Repository text must use English and ASCII characters only. This includes
 source strings, tests, documentation, examples, issue templates, and
 configuration files. `npm run check:public` enforces this rule.

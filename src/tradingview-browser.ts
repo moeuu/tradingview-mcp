@@ -4,7 +4,6 @@ import {
   lstat,
   mkdir,
   open,
-  readFile,
   realpath,
   rename,
   rm,
@@ -34,6 +33,7 @@ const SYMBOL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/!+-]{0,99}$/;
 const INTERVAL_PATTERN = /^(?:[1-9]\d{0,3}[STHDWM]?|[DWM])$/i;
 const LAYOUT_PATTERN = /^[A-Za-z0-9_-]{4,40}$/;
 const MAX_EXPORT_BYTES = 50 * 1024 * 1024;
+const MAX_DATE_RANGE_BARS = 40_000;
 const MAX_CAPTURE_BYTES = 50 * 1024 * 1024;
 const MAX_AUTH_FILE_BYTES = 1024 * 1024;
 const MAX_COOKIE_VALUE_BYTES = 16 * 1024;
@@ -235,7 +235,12 @@ export interface TradingViewHistoryResult {
   chart?: ReturnType<ChartStore["getSummary"]> | undefined;
 }
 
-export interface TradingViewDateRangeHistoryResult extends TradingViewHistoryResult {
+export interface TradingViewDateRangeHistoryResult extends Omit<
+  TradingViewHistoryResult,
+  "firstBar" | "lastBar"
+> {
+  firstBar?: Bar | undefined;
+  lastBar?: Bar | undefined;
   requestedRange: { from: string; to: string };
   chartTimezone: string | null;
   exportRows: CsvBarWithFields[];
@@ -854,8 +859,10 @@ export class TradingViewBrowserService {
     await this.#assertChartUsable();
     const archived = await this.#downloadChartData(input.outputName);
     const exported = await loadBarsWithFieldsFromCsv(archived.file, this.dataRoot, {
+      allowEmpty: true,
+      maximumBars: MAX_DATE_RANGE_BARS,
       maximumBytes: MAX_EXPORT_BYTES,
-      tailBars: MAX_BARS,
+      tailBars: MAX_DATE_RANGE_BARS,
     });
     const startBoundary = Date.parse(`${from}T00:00:00.000Z`) - 2 * 86_400_000;
     const endBoundary = Date.parse(`${to}T00:00:00.000Z`) + 2 * 86_400_000;
@@ -863,14 +870,11 @@ export class TradingViewBrowserService {
       const milliseconds = row.bar.time * 1_000;
       return milliseconds >= startBoundary && milliseconds <= endBoundary;
     });
-    const retainedRows = rangeRows.slice(-requestedBars);
+    const retainedRows = rangeRows.slice(-MAX_DATE_RANGE_BARS);
     const bars = retainedRows.map((row) => row.bar);
-    if (bars.length === 0) {
-      throw new Error("TradingView export contained no OHLCV bars near the requested date range.");
-    }
-    const chart = input.loadChart
+    const chart = input.loadChart && bars.length > 0
       ? this.store.setBars({
-          bars,
+          bars: bars.slice(-MAX_BARS),
           symbol: state.symbol,
           interval: state.interval,
           source: `TradingView Supercharts export:${path.basename(archived.target)}`,
@@ -889,12 +893,11 @@ export class TradingViewBrowserService {
       truncated: exported.truncated || rangeRows.length > retainedRows.length,
       file: archived.file,
       bytes: archived.bytes,
-      firstBar: bars[0]!,
-      lastBar: bars.at(-1)!,
       bars,
       requestedRange: { from, to },
       chartTimezone: await this.#getChartTimezone(),
       exportRows: retainedRows,
+      ...(bars.length > 0 ? { firstBar: bars[0]!, lastBar: bars.at(-1)! } : {}),
       ...(chart ? { chart: this.store.getSummary() } : {}),
     };
   }
@@ -976,6 +979,8 @@ export class TradingViewBrowserService {
   async #selectDateRange(from: string, to: string): Promise<void> {
     const page = this.#requirePage();
     await this.#dismissTransientDialogs(page);
+    await this.#waitForChart(page);
+    const beforeHash = await this.#chartVisualHash(page);
     const goToButton = page.locator('button[data-name="go-to-date"]').first();
     await goToButton.click({ timeout: this.config.timeoutMs });
     const dialog = page.getByRole("dialog").filter({ hasText: /^Go to/i }).first();
@@ -993,8 +998,69 @@ export class TradingViewBrowserService {
       force: true,
     });
     await dialog.waitFor({ state: "hidden", timeout: this.config.timeoutMs });
+    await this.#waitForDateRangeRender(page, beforeHash);
+  }
+
+  async #chartVisualHash(page: Page): Promise<string> {
+    const chart = page.getByRole("region", { name: /chart/i }).first();
+    const box = await chart.boundingBox();
+    if (!box || box.width < 100 || box.height < 100) {
+      throw new Error("TradingView chart bounds were unavailable during range navigation.");
+    }
+    const png = await page.screenshot({
+      type: "png",
+      animations: "disabled",
+      caret: "hide",
+      clip: {
+        x: box.x + box.width * 0.05,
+        y: box.y + box.height * 0.15,
+        width: box.width * 0.65,
+        height: box.height * 0.7,
+      },
+    });
+    return sha256(png);
+  }
+
+  async #chartLoadingVisible(page: Page): Promise<boolean> {
+    return page
+      .locator(
+        'main [aria-busy="true"], main [data-name*="loading" i], main [class*="loading" i]',
+      )
+      .evaluateAll((elements) =>
+        elements.some((element) => {
+          const html = element as HTMLElement;
+          const style = window.getComputedStyle(html);
+          return (
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            (html.offsetWidth > 0 || html.offsetHeight > 0 || html.getClientRects().length > 0)
+          );
+        }),
+      );
+  }
+
+  async #waitForDateRangeRender(page: Page, beforeHash: string): Promise<void> {
     await this.#waitForChart(page);
-    await page.waitForTimeout(1_000);
+    const deadline = Date.now() + this.config.timeoutMs;
+    const earliestReady = Date.now() + 750;
+    let changed = false;
+    let stableHash: string | undefined;
+    let readySamples = 0;
+    while (Date.now() < deadline) {
+      const currentHash = await this.#chartVisualHash(page);
+      changed ||= currentHash !== beforeHash;
+      const loading = await this.#chartLoadingVisible(page);
+      if (changed && !loading) {
+        readySamples = currentHash === stableHash ? readySamples + 1 : 1;
+        stableHash = currentHash;
+      } else {
+        readySamples = 0;
+        stableHash = undefined;
+      }
+      if (readySamples >= 2 && Date.now() >= earliestReady) return;
+      await page.waitForTimeout(350);
+    }
+    throw new Error("TradingView did not finish rendering the requested custom date range.");
   }
 
   async #getChartTimezone(): Promise<string | null> {
@@ -1888,7 +1954,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
           }))
           .filter((item) => item.text.length > 0);
         const mainRows = objectRows.filter((item) =>
-          /^(?:NK2251!\s*[-/]\s*OSE|OSE:NK2251!)(?:\s*,\s*\S+)?$/i.test(item.text),
+          /^(?:NK2251!\s*[-/\u00b7]\s*OSE|OSE:NK2251!)(?:\s*,\s*\S+)?$/i.test(item.text),
         );
         const nonMainRows = objectRows.filter((item) => !mainRows.includes(item));
         const legendStudies = studies;
@@ -2606,7 +2672,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
           const item = objectRows.nth(index);
           if (!(await item.isVisible().catch(() => false))) continue;
           const text = (await item.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
-          if (!text || /^NK2251!\s*[-/]\s*OSE(?:\s*,\s*\S+)?$/i.test(text)) continue;
+          if (!text || /^NK2251!\s*[-/\u00b7]\s*OSE(?:\s*,\s*\S+)?$/i.test(text)) continue;
           candidate = item;
           break;
         }
@@ -3706,13 +3772,13 @@ export function filterTradingViewStorageState(
   allowedCookieNames: readonly string[] = DEFAULT_TRADINGVIEW_AUTH_COOKIE_NAMES,
   allowedStorageKeys: readonly string[] = [],
 ): TradingViewStorageState {
-  const cookieNames = new Set(allowedCookieNames.map((name) => name.toLowerCase()));
-  const storageKeys = new Set(allowedStorageKeys.map((name) => name.toLowerCase()));
+  const cookieNames = new Set(allowedCookieNames);
+  const storageKeys = new Set(allowedStorageKeys);
   return {
     cookies: state.cookies.filter(
       (cookie) =>
         allowedCookieDomain(cookie.domain) &&
-        cookieNames.has(cookie.name.toLowerCase()) &&
+        cookieNames.has(cookie.name) &&
         cookie.value.length > 0 &&
         Buffer.byteLength(cookie.value, "utf8") <= MAX_COOKIE_VALUE_BYTES &&
         !(cookie.expires > 0 && cookie.expires <= Date.now() / 1_000),
@@ -3725,7 +3791,7 @@ export function filterTradingViewStorageState(
             origin: origin.origin,
             localStorage: origin.localStorage.filter(
               (item) =>
-                storageKeys.has(item.name.toLowerCase()) &&
+                storageKeys.has(item.name) &&
                 Buffer.byteLength(item.value, "utf8") <= MAX_STORAGE_VALUE_BYTES,
             ),
           }))
@@ -3780,7 +3846,7 @@ export async function loadTradingViewCookies(
     return cookies;
   }
 
-  const cookieNames = new Set(allowedCookieNames.map((name) => name.toLowerCase()));
+  const cookieNames = new Set(allowedCookieNames);
   const cookies: Cookie[] = [];
   for (const line of source.split(/\r?\n/)) {
     if (!line.trim() || line.startsWith("#")) continue;
@@ -3792,11 +3858,12 @@ export async function loadTradingViewCookies(
       value === undefined ||
       !domain ||
       !allowedCookieDomain(domain) ||
-      !cookieNames.has(name.toLowerCase()) ||
+      !cookieNames.has(name) ||
       value.length === 0 ||
       Buffer.byteLength(value, "utf8") > MAX_COOKIE_VALUE_BYTES
     ) continue;
     const expiresMs = Date.parse(expiresText ?? "");
+    if (Number.isFinite(expiresMs) && expiresMs <= Date.now()) continue;
     const sameSite = ["Strict", "Lax", "None"].includes(fields[8] ?? "")
       ? (fields[8] as Cookie["sameSite"])
       : "Lax";
@@ -3806,7 +3873,8 @@ export async function loadTradingViewCookies(
       domain,
       path: cookiePath || "/",
       expires: Number.isFinite(expiresMs) ? Math.trunc(expiresMs / 1_000) : -1,
-      httpOnly: fields[6]?.toLowerCase() === "true",
+      httpOnly:
+        fields[6]?.toLowerCase() === "true" || fields[6] === "\u2713",
       secure: true,
       sameSite,
     });
@@ -3823,23 +3891,53 @@ async function loadCookieFile(
 }
 
 async function readPrivateAuthenticationFile(file: string): Promise<string> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     const target = await realpath(file);
-    const info = await stat(target);
-    if (!info.isFile() || info.size === 0 || info.size > MAX_AUTH_FILE_BYTES) {
+    const noFollow = process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW;
+    handle = await open(target, fsConstants.O_RDONLY | noFollow);
+    const before = await handle.stat();
+    if (!before.isFile() || before.size === 0 || before.size > MAX_AUTH_FILE_BYTES) {
       throw new Error("unsafe authentication file shape");
     }
     if (process.platform !== "win32") {
       const currentUserId = process.getuid?.();
-      if ((info.mode & 0o077) !== 0 || (currentUserId !== undefined && info.uid !== currentUserId)) {
+      if ((before.mode & 0o077) !== 0 || (currentUserId !== undefined && before.uid !== currentUserId)) {
         throw new Error("unsafe authentication file ownership or permissions");
       }
     }
-    return await readFile(target, "utf8");
+    const buffer = Buffer.alloc(before.size + 1);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        offset,
+        buffer.length - offset,
+        offset,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    const after = await handle.stat();
+    if (
+      offset !== before.size ||
+      after.dev !== before.dev ||
+      after.ino !== before.ino ||
+      after.size !== before.size ||
+      after.mode !== before.mode ||
+      after.uid !== before.uid ||
+      after.mtimeMs !== before.mtimeMs ||
+      after.ctimeMs !== before.ctimeMs
+    ) {
+      throw new Error("authentication file changed while it was read");
+    }
+    return buffer.subarray(0, offset).toString("utf8");
   } catch {
     throw new Error(
       "TradingView authentication could not be loaded safely. Use a non-empty file smaller than 1 MiB with owner-only permissions.",
     );
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
 }
 

@@ -99,6 +99,45 @@ describe("TradingView authentication input", () => {
     expect(cookies.map((item) => item.name)).toEqual(["sessionid"]);
   });
 
+  it("matches authentication allowlists with exact case", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "tv-cookie-case-"));
+    const file = path.join(directory, "cookies.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        cookies: [
+          cookie("sessionid", "lower", ".tradingview.com"),
+          cookie("SESSIONID", "upper", ".tradingview.com"),
+        ],
+      }),
+      "utf8",
+    );
+    await chmod(file, 0o600);
+
+    const cookies = await loadTradingViewCookies(file, ["SESSIONID"]);
+
+    expect(cookies.map((item) => item.name)).toEqual(["SESSIONID"]);
+  });
+
+  it("accepts the checkmark HttpOnly marker and rejects expired TSV cookies", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "tv-cookie-tsv-"));
+    const file = path.join(directory, "cookies.tsv");
+    await writeFile(
+      file,
+      [
+        "sessionid\tfresh\t.tradingview.com\t/\t2099-01-01T00:00:00Z\t\t\u2713\t\tLax",
+        "sessionid_sign\texpired\t.tradingview.com\t/\t2000-01-01T00:00:00Z\t\ttrue\t\tLax",
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(file, 0o600);
+
+    const cookies = await loadTradingViewCookies(file, ["sessionid", "sessionid_sign"]);
+
+    expect(cookies).toHaveLength(1);
+    expect(cookies[0]).toMatchObject({ name: "sessionid", httpOnly: true });
+  });
+
   it("rejects authentication files readable by other users", async () => {
     if (process.platform === "win32") return;
     const directory = await mkdtemp(path.join(os.tmpdir(), "tv-auth-permissions-"));
@@ -240,7 +279,7 @@ describe("production Playwright capture guard", () => {
           </section>
           <section data-name="tree">Object Tree
             <div class="listContainer-fixture"><div>
-              <div data-symbol="OSE:NK2251!">NK2251! / OSE</div>
+              <div data-symbol="OSE:NK2251!">NK2251! \u00b7 OSE</div>
               <div data-symbol="CME:ES1!">ES1! / CME</div>
               <div data-study-id="STD;Ichimoku Cloud" data-study-name="Ichimoku Cloud">Ichimoku Cloud</div>
               <div data-drawing-id="line-1" data-name="drawing">Trend Line</div>

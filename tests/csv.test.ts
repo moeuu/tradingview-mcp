@@ -56,6 +56,28 @@ describe("parseBarsCsv", () => {
     expect(bars[0]!.time).toBe(1_700_000_000 + 5 * 60);
   });
 
+  it("supports a larger bounded tail for internal dense date-range exports", async () => {
+    const root = await temporaryDirectory();
+    const csvPath = path.join(root, "dense-range.csv");
+    const rows = Array.from(
+      { length: 10_005 },
+      (_, index) => `${1_700_000_000 + index * 9},10,12,9,11`,
+    );
+    await writeFile(
+      csvPath,
+      `time,open,high,low,close\n${rows.join("\n")}\n`,
+      "utf8",
+    );
+
+    const loaded = await loadBarsWithFieldsFromCsv("dense-range.csv", root, {
+      maximumBars: 25_000,
+      tailBars: 25_000,
+    });
+
+    expect(loaded.bars).toHaveLength(10_005);
+    expect(loaded.truncated).toBe(false);
+  });
+
   it("rejects empty, unordered, and malformed rows", () => {
     expect(() => parseBarsCsv("time,open,high,low,close\n")).toThrow(/no data rows/i);
     expect(() =>
@@ -73,6 +95,18 @@ describe("parseBarsCsv", () => {
 });
 
 describe("loadBarsFromCsv", () => {
+  it("can represent a header-only official range export when explicitly allowed", async () => {
+    const root = await temporaryDirectory();
+    const csvPath = path.join(root, "empty-range.csv");
+    await writeFile(csvPath, "time,open,high,low,close,volume\n", "utf8");
+
+    const loaded = await loadBarsWithFieldsFromCsv("empty-range.csv", root, {
+      allowEmpty: true,
+    });
+
+    expect(loaded).toMatchObject({ bars: [], rows: [], sourceBarCount: 0, truncated: false });
+  });
+
   it("loads relative and absolute files that resolve inside the configured data root", async () => {
     const root = await temporaryDirectory();
     const nested = path.join(root, "nested");
@@ -106,6 +140,21 @@ describe("loadBarsFromCsv", () => {
         fields: { ma: 10.5, ma_2: 10.7, rsi: 55.2, signal_label: "Bullish" },
       },
     ]);
+  });
+
+  it("makes normalized headers globally unique when a generated suffix already exists", async () => {
+    const root = await temporaryDirectory();
+    const csvPath = path.join(root, "colliding-fields.csv");
+    await writeFile(
+      csvPath,
+      "time,open,high,low,close,MA,MA_2,MA\n" +
+        "1700000000,10,12,9,11,10.5,10.6,10.7\n",
+      "utf8",
+    );
+
+    const loaded = await loadBarsWithFieldsFromCsv("colliding-fields.csv", root);
+
+    expect(loaded.rows[0]!.fields).toEqual({ ma: 10.5, ma_2: 10.6, ma_3: 10.7 });
   });
 
   it("blocks parent-directory traversal, absolute paths outside the root, and escaping symlinks", async () => {

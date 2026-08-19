@@ -5,8 +5,11 @@ import type { Bar } from "./domain.js";
 import { MAX_BARS, normalizeBar, validateBars } from "./domain.js";
 
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
+const MAX_CSV_BARS = 250_000;
 
 interface CsvLoadOptions {
+  allowEmpty?: boolean | undefined;
+  maximumBars?: number | undefined;
   maximumBytes?: number | undefined;
   tailBars?: number | undefined;
 }
@@ -50,7 +53,16 @@ export async function loadBarsFromCsv(
     throw new Error(`CSV file exceeds the ${maximumBytes}-byte limit.`);
   }
   const source = await readFile(resolved, "utf8");
-  const parsed = parseBarsCsvDetailed(source, options.tailBars);
+  const maximumBars = options.maximumBars ?? MAX_BARS;
+  if (!Number.isSafeInteger(maximumBars) || maximumBars < 1 || maximumBars > MAX_CSV_BARS) {
+    throw new Error(`CSV maximumBars must be an integer from 1 through ${MAX_CSV_BARS}.`);
+  }
+  const parsed = parseBarsCsvDetailed(
+    source,
+    options.tailBars,
+    options.allowEmpty,
+    maximumBars,
+  );
   return { ...parsed, path: resolved };
 }
 
@@ -102,9 +114,11 @@ export function parseBarsCsv(source: string, options: { tailBars?: number } = {}
 function parseBarsCsvDetailed(
   source: string,
   tailBars: number | undefined,
+  allowEmpty = false,
+  maximumBars = MAX_BARS,
 ): { bars: Bar[]; sourceBarCount: number; truncated: boolean } {
-  if (tailBars !== undefined && (!Number.isSafeInteger(tailBars) || tailBars < 1 || tailBars > MAX_BARS)) {
-    throw new Error(`CSV tailBars must be an integer from 1 through ${MAX_BARS}.`);
+  if (tailBars !== undefined && (!Number.isSafeInteger(tailBars) || tailBars < 1 || tailBars > maximumBars)) {
+    throw new Error(`CSV tailBars must be an integer from 1 through ${maximumBars}.`);
   }
   const records = parse(source, {
     columns: (headers: string[]) => headers.map((header) => header.trim().toLowerCase()),
@@ -114,10 +128,11 @@ function parseBarsCsvDetailed(
     max_record_size: 1_000_000,
   }) as Array<Record<string, unknown>>;
   if (records.length === 0) {
+    if (allowEmpty) return { bars: [], sourceBarCount: 0, truncated: false };
     throw new Error("CSV contains no data rows.");
   }
-  if (records.length > MAX_BARS && tailBars === undefined) {
-    throw new Error(`CSV contains more than ${MAX_BARS} bars.`);
+  if (records.length > maximumBars && tailBars === undefined) {
+    throw new Error(`CSV contains more than ${maximumBars} bars.`);
   }
   let bars = records.map((record) => normalizeBar(record));
   if (bars.length >= 2 && bars[0]!.time > bars.at(-1)!.time) {
@@ -127,17 +142,29 @@ function parseBarsCsvDetailed(
   if (tailBars !== undefined && bars.length > tailBars) {
     bars = bars.slice(-tailBars);
   }
-  validateBars(bars);
+  validateBars(bars, { maximum: maximumBars });
   return { bars, sourceBarCount, truncated: sourceBarCount !== bars.length };
 }
 
 function uniqueNormalizedHeaders(headers: string[]): string[] {
-  const counts = new Map<string, number>();
+  const nextSuffix = new Map<string, number>();
+  const assigned = new Set<string>();
   return headers.map((header, index) => {
     const base = header.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || `field_${index + 1}`;
-    const count = (counts.get(base) ?? 0) + 1;
-    counts.set(base, count);
-    return count === 1 ? base : `${base}_${count}`;
+    if (!assigned.has(base)) {
+      assigned.add(base);
+      nextSuffix.set(base, 2);
+      return base;
+    }
+    let suffix = nextSuffix.get(base) ?? 2;
+    let candidate = `${base}_${suffix}`;
+    while (assigned.has(candidate)) {
+      suffix += 1;
+      candidate = `${base}_${suffix}`;
+    }
+    assigned.add(candidate);
+    nextSuffix.set(base, suffix + 1);
+    return candidate;
   });
 }
 
