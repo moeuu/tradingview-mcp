@@ -1244,7 +1244,9 @@ describe("official TradingView atomic capture batch", () => {
     const manifestPath = path.join(captureRoot, manifest.batchId, "manifest.json");
     const currentPath = path.join(captureRoot, "CURRENT");
     const invalid = structuredClone(manifest);
-    invalid.panels[1]!.captureStartedAt = invalid.batchStartedAt;
+    invalid.panels[1]!.captureStartedAt = new Date(
+      Date.parse(invalid.panels[0]!.captureEndedAt) - 1,
+    ).toISOString();
     invalid.manifestIdentity = computeTradingViewCaptureManifestIdentity(invalid);
     await writeFile(manifestPath, `${JSON.stringify(invalid)}\n`);
     await writeFile(

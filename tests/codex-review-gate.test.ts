@@ -5,8 +5,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   CODEX_BOT_LOGIN,
-  GITHUB_ACTIONS_BOT_LOGIN,
-  codexRequestReactionState,
   detectCodexCompletion,
   githubRetryAfterMs,
   retryableGithubStatus,
@@ -19,7 +17,6 @@ const REPOSITORY_ROOT = fileURLToPath(new URL("..", import.meta.url));
 describe("Codex review gate", () => {
   it("pins the trusted identities used by the gate", () => {
     expect(CODEX_BOT_LOGIN).toBe("chatgpt-codex-connector[bot]");
-    expect(GITHUB_ACTIONS_BOT_LOGIN).toBe("github-actions[bot]");
   });
 
   it("uses only pull request and status scopes for automatic review verification", () => {
@@ -31,10 +28,12 @@ describe("Codex review gate", () => {
     expect(gate).toContain("pull_request_target:");
     expect(gate).toContain("types: [edited, opened, ready_for_review, synchronize]");
     expect(gate).toContain("github.event.changes.base.ref.from != null");
-    expect(gate).toContain("FORCE_CODEX_VERIFICATION:");
-    expect(gate).toContain("timeout-minutes: 70");
+    expect(gate).toContain("REQUIRE_COMMIT_BOUND_REVIEW:");
+    expect(gate).toContain("PR_PREVIOUS_SHA:");
+    expect(gate).toContain("timeout-minutes: 35");
     expect(gate).not.toContain("issues: write");
-    expect(gate).toContain("pull-requests: write");
+    expect(gate).toContain("pull-requests: read");
+    expect(gate).not.toContain("pull-requests: write");
     expect(gate).toContain("statuses: write");
     expect(gate).toContain("github.event.pull_request.updated_at");
     const gateScript = readFileSync(
@@ -42,26 +41,11 @@ describe("Codex review gate", () => {
       "utf8",
     );
     expect(gateScript).toContain("AbortSignal.timeout(requestBudgetMs)");
-    expect(gateScript).toContain("process.env.FORCE_CODEX_VERIFICATION === \"true\"");
-    expect(gateScript).toContain("setApiDeadline(verificationDeadline)");
+    expect(gateScript).toContain(
+      "process.env.REQUIRE_COMMIT_BOUND_REVIEW === \"true\"",
+    );
+    expect(gateScript).toContain("previousReviewIsPending");
     expect(gateScript).toContain("CODEX_AUTO_START_GRACE_MS");
-  });
-
-  it("tracks the commit-bound verification request lifecycle", () => {
-    expect(codexRequestReactionState([])).toEqual({
-      acknowledged: false,
-      inProgress: false,
-    });
-    expect(
-      codexRequestReactionState([
-        { user: { login: CODEX_BOT_LOGIN }, content: "eyes" },
-      ]),
-    ).toEqual({ acknowledged: true, inProgress: true });
-    expect(
-      codexRequestReactionState([
-        { user: { login: CODEX_BOT_LOGIN }, content: "+1" },
-      ]),
-    ).toEqual({ acknowledged: true, inProgress: false });
   });
 
   it("accepts a submitted Codex review only for the current head", () => {
@@ -112,7 +96,7 @@ describe("Codex review gate", () => {
     expect(result).toEqual({ complete: false, outcome: "pending", completedAt: null });
   });
 
-  it("requires commit-bound verification after an automatic thumbs-up", () => {
+  it("keeps an automatic thumbs-up separate from commit-bound evidence", () => {
     const result = detectCodexCompletion({
       headSha: HEAD_SHA,
       reviewTriggeredAt: REVIEW_TRIGGERED_AT,
@@ -128,7 +112,7 @@ describe("Codex review gate", () => {
 
     expect(result).toEqual({
       complete: false,
-      outcome: "verification-required",
+      outcome: "clean-reaction",
       completedAt: "2026-08-19T08:05:00Z",
     });
   });
@@ -151,27 +135,6 @@ describe("Codex review gate", () => {
       complete: false,
       outcome: "in-progress",
       completedAt: "2026-08-19T08:00:10Z",
-    });
-  });
-
-  it("accepts a thumbs-up on the head-specific verification request", () => {
-    const result = detectCodexCompletion({
-      headSha: HEAD_SHA,
-      reviewTriggeredAt: REVIEW_TRIGGERED_AT,
-      reviews: [],
-      commitBoundReactions: [
-        {
-          user: { login: CODEX_BOT_LOGIN },
-          content: "+1",
-          created_at: "2026-08-19T08:05:00Z",
-        },
-      ],
-    });
-
-    expect(result).toEqual({
-      complete: true,
-      outcome: "no-suggestions",
-      completedAt: "2026-08-19T08:05:00Z",
     });
   });
 

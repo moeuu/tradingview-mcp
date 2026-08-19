@@ -37,20 +37,21 @@ thumbs-up when it has none. Resolve every review thread before merging. A new
 commit invalidates the previous result and requests another Codex review.
 
 Repository Codex settings request an automatic review for every push. The gate
-observes that review and publishes its commit-specific status. When a clean
-automatic review produces only an ambiguous pull request reaction, the gate
-requests one commit-bound verification. It uses the ephemeral GitHub Actions
-token and requires no personal access token or extra secret. The gate runs only
-trusted code from the default branch and never checks out or executes pull
-request code with its scoped token.
+observes that review and publishes its commit-specific status. It uses only the
+ephemeral GitHub Actions token with pull request read and commit status write
+permissions; no personal access token or extra secret is required. The gate
+runs only trusted code from the default branch and never checks out or executes
+pull request code with its scoped token.
 
-If Codex does not acknowledge an automatic review within two minutes, the gate
-uses the same commit-bound verification path instead of waiting for a silent
-automatic trigger for the full review timeout.
+For a clean automatic review, the gate accepts a thumbs-up only after observing
+a fresh in-progress acknowledgement for the current pull request event and
+confirming the previous head had no pending Codex review. If Codex does not
+acknowledge within two minutes, the pending status asks a maintainer to comment
+`@codex review` while the gate continues waiting for commit-bound evidence.
 
 The gate runs when a pull request is opened, marked ready for review, receives a
 new commit, or is retargeted to `main`. A base retarget immediately invalidates
-the previous status and requests a commit-bound review of the new diff.
+the previous status and waits for a maintainer-triggered review of the new diff.
 
 Repository text must use English and ASCII characters only. This includes
 source strings, tests, documentation, examples, issue templates, and

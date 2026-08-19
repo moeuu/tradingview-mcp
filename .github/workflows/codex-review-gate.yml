@@ -7,7 +7,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
   statuses: write
 
 jobs:
@@ -16,7 +16,7 @@ jobs:
       github.event.pull_request.draft == false &&
       (github.event.action != 'edited' || github.event.changes.base.ref.from != null)
     runs-on: ubuntu-latest
-    timeout-minutes: 70
+    timeout-minutes: 35
     concurrency:
       group: codex-review-${{ github.event.pull_request.number }}
       cancel-in-progress: true
@@ -30,9 +30,10 @@ jobs:
 
       - name: Wait for Codex review of the pull request head
         env:
-          FORCE_CODEX_VERIFICATION: ${{ github.event.action == 'edited' }}
+          REQUIRE_COMMIT_BOUND_REVIEW: ${{ github.event.action == 'edited' }}
           GITHUB_TOKEN: ${{ github.token }}
           PR_EVENT_AT: ${{ github.event.pull_request.updated_at }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_PREVIOUS_SHA: ${{ github.event.before }}
         run: node scripts/codex-review-gate.mjs
