@@ -56,6 +56,28 @@ describe("parseBarsCsv", () => {
     expect(bars[0]!.time).toBe(1_700_000_000 + 5 * 60);
   });
 
+  it("supports a larger bounded tail for internal dense date-range exports", async () => {
+    const root = await temporaryDirectory();
+    const csvPath = path.join(root, "dense-range.csv");
+    const rows = Array.from(
+      { length: 10_005 },
+      (_, index) => `${1_700_000_000 + index * 9},10,12,9,11`,
+    );
+    await writeFile(
+      csvPath,
+      `time,open,high,low,close\n${rows.join("\n")}\n`,
+      "utf8",
+    );
+
+    const loaded = await loadBarsWithFieldsFromCsv("dense-range.csv", root, {
+      maximumBars: 25_000,
+      tailBars: 25_000,
+    });
+
+    expect(loaded.bars).toHaveLength(10_005);
+    expect(loaded.truncated).toBe(false);
+  });
+
   it("rejects empty, unordered, and malformed rows", () => {
     expect(() => parseBarsCsv("time,open,high,low,close\n")).toThrow(/no data rows/i);
     expect(() =>

@@ -11,15 +11,16 @@ permissions:
   pull-requests: read
   statuses: write
 
-concurrency:
-  group: codex-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   wait-for-codex:
-    if: github.event.pull_request.draft == false
+    if: >-
+      github.event.pull_request.draft == false &&
+      (github.event.action != 'edited' || github.event.changes.base.ref.from != null)
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    concurrency:
+      group: codex-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
 
     steps:
       - name: Check out trusted gate code

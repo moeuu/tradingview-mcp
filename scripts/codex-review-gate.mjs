@@ -84,7 +84,7 @@ export function codexRequestReactionState(reactions) {
 
 async function githubJson(apiPath, options = {}) {
   const method = options.method ?? "GET";
-  const attempts = method === "GET" ? 4 : 1;
+  const attempts = method === "GET" || options.retryTransient === true ? 4 : 1;
   let lastStatus;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     let response;
@@ -135,6 +135,7 @@ async function setStatus(repository, headSha, state, description) {
   const runUrl = `${requiredEnvironment("GITHUB_SERVER_URL")}/${repository}/actions/runs/${requiredEnvironment("GITHUB_RUN_ID")}`;
   await githubJson(`/repos/${repository}/statuses/${headSha}`, {
     method: "POST",
+    retryTransient: true,
     body: {
       state,
       context: CODEX_STATUS_CONTEXT,

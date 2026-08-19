@@ -33,6 +33,7 @@ const SYMBOL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/!+-]{0,99}$/;
 const INTERVAL_PATTERN = /^(?:[1-9]\d{0,3}[STHDWM]?|[DWM])$/i;
 const LAYOUT_PATTERN = /^[A-Za-z0-9_-]{4,40}$/;
 const MAX_EXPORT_BYTES = 50 * 1024 * 1024;
+const MAX_DATE_RANGE_BARS = 25_000;
 const MAX_CAPTURE_BYTES = 50 * 1024 * 1024;
 const MAX_AUTH_FILE_BYTES = 1024 * 1024;
 const MAX_COOKIE_VALUE_BYTES = 16 * 1024;
@@ -859,8 +860,9 @@ export class TradingViewBrowserService {
     const archived = await this.#downloadChartData(input.outputName);
     const exported = await loadBarsWithFieldsFromCsv(archived.file, this.dataRoot, {
       allowEmpty: true,
+      maximumBars: MAX_DATE_RANGE_BARS,
       maximumBytes: MAX_EXPORT_BYTES,
-      tailBars: MAX_BARS,
+      tailBars: MAX_DATE_RANGE_BARS,
     });
     const startBoundary = Date.parse(`${from}T00:00:00.000Z`) - 2 * 86_400_000;
     const endBoundary = Date.parse(`${to}T00:00:00.000Z`) + 2 * 86_400_000;
@@ -868,11 +870,11 @@ export class TradingViewBrowserService {
       const milliseconds = row.bar.time * 1_000;
       return milliseconds >= startBoundary && milliseconds <= endBoundary;
     });
-    const retainedRows = rangeRows.slice(-MAX_BARS);
+    const retainedRows = rangeRows.slice(-MAX_DATE_RANGE_BARS);
     const bars = retainedRows.map((row) => row.bar);
     const chart = input.loadChart && bars.length > 0
       ? this.store.setBars({
-          bars,
+          bars: bars.slice(-MAX_BARS),
           symbol: state.symbol,
           interval: state.interval,
           source: `TradingView Supercharts export:${path.basename(archived.target)}`,
