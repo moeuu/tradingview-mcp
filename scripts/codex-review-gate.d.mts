@@ -40,3 +40,5 @@ export function codexRequestReactionState(
     content?: string | undefined;
   }>,
 ): { acknowledged: boolean; inProgress: boolean };
+
+export function githubRetryAfterMs(value: string | null): number | undefined;

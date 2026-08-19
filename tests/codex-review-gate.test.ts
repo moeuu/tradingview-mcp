@@ -5,6 +5,7 @@ import {
   GITHUB_ACTIONS_BOT_LOGIN,
   codexRequestReactionState,
   detectCodexCompletion,
+  githubRetryAfterMs,
   retryableGithubStatus,
 } from "../scripts/codex-review-gate.mjs";
 
@@ -168,5 +169,10 @@ describe("Codex review gate", () => {
   it("retries only transient GitHub response statuses", () => {
     expect([429, 500, 502, 503, 504].every(retryableGithubStatus)).toBe(true);
     expect([400, 401, 403, 404, 422].some(retryableGithubStatus)).toBe(false);
+  });
+
+  it("honors GitHub Retry-After durations without a ten-second cap", () => {
+    expect(githubRetryAfterMs("45")).toBe(45_000);
+    expect(githubRetryAfterMs("invalid")).toBeUndefined();
   });
 });

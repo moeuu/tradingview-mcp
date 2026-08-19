@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 export const CODEX_BOT_LOGIN = "chatgpt-codex-connector[bot]";
 export const CODEX_STATUS_CONTEXT = "codex-review";
 export const GITHUB_ACTIONS_BOT_LOGIN = "github-actions[bot]";
+const GITHUB_RETRY_BUDGET_MS = 30 * 60 * 1_000;
 
 export function detectCodexCompletion({
   reviews,
@@ -82,9 +83,15 @@ export function codexRequestReactionState(reactions) {
   };
 }
 
+export function githubRetryAfterMs(value) {
+  const seconds = Number(value);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : undefined;
+}
+
 async function githubJson(apiPath, options = {}) {
   const method = options.method ?? "GET";
   const attempts = method === "GET" || options.retryTransient === true ? 4 : 1;
+  const retryDeadline = Date.now() + GITHUB_RETRY_BUDGET_MS;
   let lastStatus;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     let response;
@@ -109,12 +116,10 @@ async function githubJson(apiPath, options = {}) {
     }
     lastStatus = response.status;
     if (!retryableGithubStatus(response.status) || attempt + 1 >= attempts) break;
-    const retryAfterSeconds = Number(response.headers.get("retry-after"));
-    await delay(
-      Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0
-        ? Math.min(10_000, retryAfterSeconds * 1_000)
-        : retryDelayMs(attempt),
-    );
+    const retryAfterMs = githubRetryAfterMs(response.headers.get("retry-after"));
+    const retryDelay = retryAfterMs ?? retryDelayMs(attempt);
+    if (retryDelay > retryDeadline - Date.now()) break;
+    await delay(retryDelay);
   }
   throw new Error(`GitHub API ${method} ${apiPath} failed with status ${lastStatus ?? "unknown"}.`);
 }
