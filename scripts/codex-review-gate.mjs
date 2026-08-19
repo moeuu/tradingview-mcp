@@ -265,7 +265,7 @@ async function main() {
     requiredEnvironment("PR_EVENT_AT"),
     "PR_EVENT_AT",
   );
-  const requireCommitBoundReview = process.env.REQUIRE_COMMIT_BOUND_REVIEW === "true";
+  const baseRetargeted = process.env.BASE_RETARGETED === "true";
   const previousHeadSha = optionalSha(process.env.PR_PREVIOUS_SHA, "PR_PREVIOUS_SHA");
 
   const timeoutMs = positiveInteger(
@@ -282,6 +282,19 @@ async function main() {
   );
   const deadline = Date.now() + timeoutMs;
   const autoStartDeadline = Math.min(deadline, Date.now() + autoStartGraceMs);
+  if (baseRetargeted) {
+    setApiDeadline(Date.now() + STATUS_REPORT_TIMEOUT_MS);
+    await setStatus(
+      repository,
+      headSha,
+      "failure",
+      "Push a new head commit after changing the pull request base",
+    );
+    process.stdout.write(
+      "The pull request base changed; push a new head commit before review.\n",
+    );
+    return;
+  }
   setApiDeadline(deadline);
   await setStatus(repository, headSha, "pending", "Waiting for Codex review on this commit");
   try {
@@ -301,8 +314,7 @@ async function main() {
       if (
         completion.outcome === "clean-reaction" &&
         autoAcknowledged &&
-        !overlappingReview &&
-        !requireCommitBoundReview
+        !overlappingReview
       ) {
         completion = {
           complete: true,
@@ -314,13 +326,11 @@ async function main() {
       }
       if (
         !manualNoticePublished &&
-        (requireCommitBoundReview || overlappingReview || Date.now() >= autoStartDeadline)
+        (overlappingReview || Date.now() >= autoStartDeadline)
       ) {
-        const description = requireCommitBoundReview
-          ? "Manual Codex review required after base retarget"
-          : overlappingReview
-            ? "Head-specific Codex review required after overlapping push"
-            : "Automatic Codex review did not start; comment @codex review";
+        const description = overlappingReview
+          ? "Head-specific Codex review required after overlapping push"
+          : "Automatic Codex review did not start; comment @codex review";
         await setStatus(repository, headSha, "pending", description);
         manualNoticePublished = true;
       }

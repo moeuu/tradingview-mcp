@@ -53,7 +53,9 @@ bound directly to the pull request head commit.
 
 The gate runs when a pull request is opened, marked ready for review, receives a
 new commit, or is retargeted to `main`. A base retarget immediately invalidates
-the previous status and waits for a maintainer-triggered review of the new diff.
+the previous status and requires a new head commit. GitHub's review data does
+not identify the reviewed base commit, so this new head is required to bind the
+next review unambiguously to the retargeted diff.
 
 Repository text must use English and ASCII characters only. This includes
 source strings, tests, documentation, examples, issue templates, and

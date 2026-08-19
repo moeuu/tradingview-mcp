@@ -30,7 +30,7 @@ jobs:
 
       - name: Wait for Codex review of the pull request head
         env:
-          REQUIRE_COMMIT_BOUND_REVIEW: ${{ github.event.action == 'edited' }}
+          BASE_RETARGETED: ${{ github.event.action == 'edited' }}
           GITHUB_TOKEN: ${{ github.token }}
           PR_EVENT_AT: ${{ github.event.pull_request.updated_at }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}

@@ -28,7 +28,7 @@ describe("Codex review gate", () => {
     expect(gate).toContain("pull_request_target:");
     expect(gate).toContain("types: [edited, opened, ready_for_review, synchronize]");
     expect(gate).toContain("github.event.changes.base.ref.from != null");
-    expect(gate).toContain("REQUIRE_COMMIT_BOUND_REVIEW:");
+    expect(gate).toContain("BASE_RETARGETED:");
     expect(gate).toContain("PR_PREVIOUS_SHA:");
     expect(gate).toContain("timeout-minutes: 35");
     expect(gate).not.toContain("issues: write");
@@ -42,7 +42,10 @@ describe("Codex review gate", () => {
     );
     expect(gateScript).toContain("AbortSignal.timeout(requestBudgetMs)");
     expect(gateScript).toContain(
-      "process.env.REQUIRE_COMMIT_BOUND_REVIEW === \"true\"",
+      "process.env.BASE_RETARGETED === \"true\"",
+    );
+    expect(gateScript).toContain(
+      "Push a new head commit after changing the pull request base",
     );
     expect(gateScript).toContain("previousReviewIsPending");
     expect(gateScript).toContain("CODEX_AUTO_START_GRACE_MS");

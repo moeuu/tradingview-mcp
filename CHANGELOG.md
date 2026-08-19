@@ -16,8 +16,9 @@ Versioning.
   reactions that could belong to an older in-flight review.
 - Bound review polling, API retries, and request timeouts within one workflow
   deadline.
-- Invalidate prior review status and require head-specific evidence after a base
-  retarget or an overlapping push.
+- Invalidate prior review status and require a new head commit after a base
+  retarget because GitHub review records do not identify the reviewed base.
+- Require head-specific evidence after an overlapping push.
 - Ask for a manual review in the pending status when an automatic review is not
   acknowledged within two minutes.
 - Preserve simultaneous automatic-review acknowledgement and completion
