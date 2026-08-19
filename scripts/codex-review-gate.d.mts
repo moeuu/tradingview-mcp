@@ -28,11 +28,3 @@ export function detectCodexCompletion(
 ): CodexReviewGateResult;
 
 export function retryableGithubStatus(status: number): boolean;
-
-export function isTrustedReviewRequestComment(
-  comment: {
-    user?: { login?: string | undefined } | undefined;
-    body?: string | undefined;
-  },
-  marker: string,
-): boolean;

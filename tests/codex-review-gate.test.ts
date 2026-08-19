@@ -4,7 +4,6 @@ import {
   CODEX_BOT_LOGIN,
   GITHUB_ACTIONS_BOT_LOGIN,
   detectCodexCompletion,
-  isTrustedReviewRequestComment,
   retryableGithubStatus,
 } from "../scripts/codex-review-gate.mjs";
 
@@ -15,25 +14,6 @@ describe("Codex review gate", () => {
   it("pins the trusted identities used by the gate", () => {
     expect(CODEX_BOT_LOGIN).toBe("chatgpt-codex-connector[bot]");
     expect(GITHUB_ACTIONS_BOT_LOGIN).toBe("github-actions[bot]");
-  });
-
-  it("accepts only a GitHub Actions marker comment", () => {
-    const marker = "<!-- codex-review-gate:head-sha -->";
-    expect(
-      isTrustedReviewRequestComment(
-        {
-          user: { login: GITHUB_ACTIONS_BOT_LOGIN },
-          body: `@codex review\n\n${marker}`,
-        },
-        marker,
-      ),
-    ).toBe(true);
-    expect(
-      isTrustedReviewRequestComment(
-        { user: { login: "contributor" }, body: marker },
-        marker,
-      ),
-    ).toBe(false);
   });
 
   it("accepts a submitted Codex review only for the current head", () => {

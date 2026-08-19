@@ -66,7 +66,7 @@ describe("MCP TradingView workflows", () => {
         date: "2024-02-01",
         interval: "W",
       }),
-    ).toThrow(/daily, minutes, or hours/i);
+    ).toThrow(/daily, seconds, minutes, or hours/i);
     for (const interval of ["2880", "48H"]) {
       expect(() =>
         TradingViewDayInputSchema.parse({
@@ -76,7 +76,7 @@ describe("MCP TradingView workflows", () => {
         }),
       ).toThrow(/24 hours/i);
     }
-    for (const interval of ["1440", "24H"]) {
+    for (const interval of ["30S", "9999S", "1440", "24H"]) {
       expect(
         TradingViewDayInputSchema.parse({
           symbol: "NASDAQ:AAPL",

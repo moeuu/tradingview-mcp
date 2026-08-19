@@ -48,14 +48,6 @@ export function retryableGithubStatus(status) {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
-export function isTrustedReviewRequestComment(comment, marker) {
-  return (
-    comment?.user?.login === GITHUB_ACTIONS_BOT_LOGIN &&
-    typeof comment.body === "string" &&
-    comment.body.includes(marker)
-  );
-}
-
 async function githubJson(apiPath, options = {}) {
   const method = options.method ?? "GET";
   const attempts = method === "GET" ? 4 : 1;
@@ -118,15 +110,8 @@ async function setStatus(repository, headSha, state, description) {
   });
 }
 
-async function ensureReviewRequest(repository, pullNumber, headSha) {
-  const marker = `<!-- codex-review-gate:${headSha} -->`;
-  const comments = await githubPages(`/repos/${repository}/issues/${pullNumber}/comments`);
-  const existing = comments.find((comment) =>
-    isTrustedReviewRequestComment(comment, marker),
-  );
-  if (existing) {
-    return reviewRequest(existing);
-  }
+async function createReviewRequest(repository, pullNumber, headSha) {
+  const marker = `<!-- codex-review-gate:${headSha}:${requiredEnvironment("GITHUB_RUN_ID")}:${requiredEnvironment("GITHUB_RUN_ATTEMPT")} -->`;
   const created = await githubJson(`/repos/${repository}/issues/${pullNumber}/comments`, {
     method: "POST",
     body: { body: `@codex review\n\n${marker}` },
@@ -154,7 +139,7 @@ async function main() {
 
   await setStatus(repository, headSha, "pending", "Waiting for Codex review on this commit");
   try {
-    const request = await ensureReviewRequest(repository, pullNumber, headSha);
+    const request = await createReviewRequest(repository, pullNumber, headSha);
     let completion = await readCompletion(repository, pullNumber, headSha, request);
 
     const timeoutMs = positiveInteger(
