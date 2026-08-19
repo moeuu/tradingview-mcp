@@ -51,7 +51,7 @@ describe("MCP stdio server", () => {
 
       expect(client.getServerVersion()).toMatchObject({
         name: "tradingview-mcp",
-        version: "0.4.1",
+        version: "0.1.0",
       });
       expect(client.getInstructions()).toContain("tradingview_get_day");
       expect(client.getInstructions()).toContain("start on demand");

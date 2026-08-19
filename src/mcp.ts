@@ -11,7 +11,7 @@ const INSTRUCTIONS =
 export async function startMcpServer(): Promise<void> {
   const runtime = await createRuntime();
   const server = new McpServer(
-    { name: "tradingview-mcp", version: "0.4.1" },
+    { name: "tradingview-mcp", version: "0.1.0" },
     { instructions: INSTRUCTIONS, capabilities: { logging: {} } },
   );
   registerTools(server, runtime);
