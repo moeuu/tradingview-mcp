@@ -50,7 +50,7 @@ async function walk(directory) {
       await walk(path);
       continue;
     }
-    if (!entry.isFile() || path === self) {
+    if (!entry.isFile()) {
       continue;
     }
 
@@ -64,6 +64,10 @@ async function walk(directory) {
       continue;
     }
     const text = content.toString("utf8");
+    if (/[^\x09\x0a\x0d\x20-\x7e]/u.test(text)) {
+      findings.push(`${relative(root, path)}: non-ASCII text; repository text must be English-only`);
+    }
+    if (path === self) continue;
     const patterns = [...environmentSpecificPatterns, ...secretPatterns];
     for (const { label, pattern } of patterns) {
       pattern.lastIndex = 0;

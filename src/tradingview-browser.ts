@@ -16,6 +16,7 @@ import { inflateSync } from "node:zlib";
 import type { Browser, BrowserContext, Cookie, Locator, Page } from "playwright";
 import type { ChartStore } from "./chart-store.js";
 import type { AppConfig } from "./config.js";
+import { DEFAULT_TRADINGVIEW_AUTH_COOKIE_NAMES } from "./auth-policy.js";
 import { loadBarsFromCsv } from "./csv.js";
 import type { Bar } from "./domain.js";
 import { MAX_BARS } from "./domain.js";
@@ -33,15 +34,18 @@ const INTERVAL_PATTERN = /^(?:[1-9]\d{0,3}[STHDWM]?|[DWM])$/i;
 const LAYOUT_PATTERN = /^[A-Za-z0-9_-]{4,40}$/;
 const MAX_EXPORT_BYTES = 50 * 1024 * 1024;
 const MAX_CAPTURE_BYTES = 50 * 1024 * 1024;
+const MAX_AUTH_FILE_BYTES = 1024 * 1024;
+const MAX_COOKIE_VALUE_BYTES = 16 * 1024;
+const MAX_STORAGE_VALUE_BYTES = 128 * 1024;
 const CAPTURE_WIDTH = 1_800;
 const CAPTURE_HEIGHT = 850;
 const CAPTURE_INTERVALS = ["5", "60", "240", "D", "W", "M"] as const;
 const CAPTURE_FILE_LABELS = ["5m", "1h", "4h", "D", "W", "M"] as const;
 const CAPTURE_CURRENT_SCHEMA = "tradingview-capture-current/v1";
 const FORBIDDEN_COMMERCE_PATTERN =
-  /アップグレード|無料.{0,4}トライアル|トライアル.{0,8}開始|購入|お支払い|支払い|決済|サブスクリプション|プランを選択|upgrade|free\s+trial|start\s+(?:a\s+)?trial|purchase|payment|billing|subscribe|subscription|choose\s+(?:a\s+)?plan/i;
+  /upgrade|free\s+trial|start\s+(?:a\s+)?trial|purchase|payment|billing|subscribe|subscription|choose\s+(?:a\s+)?plan/i;
 const FORBIDDEN_COMMERCE_REQUEST_PATTERN =
-  /アップグレード|無料.{0,4}トライアル|購入|お支払い|決済|プランを選択|upgrade|free\s+trial|start[_\s-]*(?:a[_\s-]*)?trial|purchase|payment|billing|checkout|choose[_\s-]*(?:a[_\s-]*)?plan/i;
+  /upgrade|free\s+trial|start[_\s-]*(?:a[_\s-]*)?trial|purchase|payment|billing|checkout|choose[_\s-]*(?:a[_\s-]*)?plan/i;
 const FORBIDDEN_MUTATION_PATTERN =
   /(?:\/(?:charts?|layouts?)(?:\/[^\s/?#]+)?\/(?:save|update)(?:[\s/?#&]|$)|\/(?:save|autosave)(?:[\s/?#&]|$)|(?:^|[\s"'/:_.-])(?:auto.?save|save[_-]?(?:chart|layout)|update[_-]?(?:chart|layout)|chart[_-]?(?:save|update)|layout[_-]?(?:save|update)|publish[_-]?(?:chart|layout))(?:$|[\s"'/?#&=:_.-]))/i;
 const BENIGN_TELEMETRY_PATTERN =
@@ -528,18 +532,27 @@ export class TradingViewBrowserService {
   async #captureStorageState(): Promise<TradingViewStorageState | undefined> {
     if (this.config.authStatePath) {
       return cloneTradingViewStorageState(
-        await loadTradingViewStorageState(this.config.authStatePath),
+        await loadTradingViewStorageState(
+          this.config.authStatePath,
+          this.config.authCookieNames,
+          this.config.authStorageKeys,
+        ),
       );
     }
     if (this.config.cookieFile) {
       return cloneTradingViewStorageState({
-        cookies: await loadCookieFile(this.config.cookieFile),
+        cookies: await loadCookieFile(
+          this.config.cookieFile,
+          this.config.authCookieNames,
+        ),
         origins: [],
       });
     }
     if (this.#context) {
       return cloneTradingViewStorageState(filterTradingViewStorageState(
         await this.#context.storageState(),
+        this.config.authCookieNames,
+        this.config.authStorageKeys,
       ));
     }
     return undefined;
@@ -601,19 +614,19 @@ export class TradingViewBrowserService {
 
   async #selectSecondsInterval(page: Page, interval: string): Promise<void> {
     const seconds = Number.parseInt(interval.slice(0, -1), 10);
-    const requestedLabel = new RegExp(`^${seconds}\\s*(?:秒|seconds?)$`, "i");
+    const requestedLabel = new RegExp(`^${seconds}\\s*seconds?$`, "i");
     const actionTimeout = Math.min(this.config.timeoutMs, 8_000);
     await this.#dismissTransientDialogs(page);
     const intervalButton = page
       .getByRole("toolbar")
       .first()
       .getByRole("button", {
-        name: /\d+\s*(?:秒|分|時間|日|週|月|seconds?|minutes?|hours?|days?|weeks?|months?)/i,
+        name: /\d+\s*(?:seconds?|minutes?|hours?|days?|weeks?|months?)/i,
       })
       .first();
     await intervalButton.click({ timeout: actionTimeout });
 
-    const secondsGroup = page.getByRole("row", { name: /^(?:秒|seconds?)$/i }).first();
+    const secondsGroup = page.getByRole("row", { name: /^seconds?$/i }).first();
     if ((await secondsGroup.count()) > 0) {
       const expanded = await secondsGroup.getAttribute("aria-expanded");
       if (expanded !== "true") await secondsGroup.click({ timeout: actionTimeout });
@@ -625,7 +638,7 @@ export class TradingViewBrowserService {
     await page.waitForTimeout(300);
 
     const upgrade = page.getByText(
-      /秒単位で市場をチェック|プランをアップグレードして、秒足|upgrade.*(?:second|plan)/i,
+      /upgrade.*(?:second|plan)/i,
     );
     if ((await upgrade.count()) > 0 && (await upgrade.first().isVisible().catch(() => false))) {
       await page.keyboard.press("Escape").catch(() => undefined);
@@ -651,12 +664,12 @@ export class TradingViewBrowserService {
     const page = this.#page;
     if (!page) throw new Error("No TradingView chart is open. Call tradingview_open_chart first.");
     const uiAuthenticated =
-      (await page.getByRole("button", { name: /ログインユーザー|logged-in user/i }).count()) > 0;
+      (await page.getByRole("button", { name: /logged-in user/i }).count()) > 0;
     const contextCookies = (await this.#context?.cookies()) ?? [];
     const sessionAuthenticated = contextCookies.some(
       (cookie) => cookie.name.toLowerCase() === "sessionid" && cookie.value.length > 0,
     );
-    const chartRegion = page.getByRole("region", { name: /チャート|chart/i }).first();
+    const chartRegion = page.getByRole("region", { name: /chart/i }).first();
     const chartLabel = (await chartRegion.getAttribute("aria-label").catch(() => null)) ?? undefined;
     const bodyText = await page.locator("body").innerText({ timeout: 5_000 }).catch(() => "");
     return {
@@ -666,7 +679,7 @@ export class TradingViewBrowserService {
       interval: this.#interval,
       authenticated: uiAuthenticated || sessionAuthenticated,
       ...(chartLabel ? { chartLabel } : {}),
-      delayed: /遅延データ|delayed data|データは\d+分遅延/i.test(bodyText),
+      delayed: /delayed data|data is delayed/i.test(bodyText),
     };
   }
 
@@ -675,9 +688,9 @@ export class TradingViewBrowserService {
     const indicator = validateLabel(name, "indicator", 120);
     const page = this.#requirePage();
     await page
-      .getByRole("button", { name: /インジケーター・指標・ストラテジー|indicators, metrics & strategies/i })
+      .getByRole("button", { name: /indicators, metrics & strategies/i })
       .click({ timeout: this.config.timeoutMs });
-    const search = page.getByRole("searchbox", { name: /検索|search/i });
+    const search = page.getByRole("searchbox", { name: /search/i });
     await search.fill(indicator);
     const exactItem = page.locator('[data-role="list-item"]').filter({ hasText: indicator }).first();
     await exactItem.waitFor({ state: "visible", timeout: this.config.timeoutMs });
@@ -698,7 +711,7 @@ export class TradingViewBrowserService {
     await page.setViewportSize({ width, height });
     await this.#waitForChart(page);
     if (options.chartOnly ?? true) {
-      return page.getByRole("region", { name: /チャート|chart/i }).first().screenshot({ type: "png" });
+      return page.getByRole("region", { name: /chart/i }).first().screenshot({ type: "png" });
     }
     return page.screenshot({ type: "png", fullPage: false });
   }
@@ -804,7 +817,7 @@ export class TradingViewBrowserService {
   async #loadEarlierBars(missingBars: number): Promise<void> {
     const page = this.#requirePage();
     await this.#dismissTransientDialogs(page);
-    const chart = page.getByRole("region", { name: /チャート|chart/i }).first();
+    const chart = page.getByRole("region", { name: /chart/i }).first();
     await chart.click({ position: { x: 80, y: 120 }, timeout: this.config.timeoutMs });
     const jumps = Math.min(40, Math.max(2, Math.ceil(missingBars / 100)));
     for (let index = 0; index < jumps; index += 1) {
@@ -838,7 +851,7 @@ export class TradingViewBrowserService {
           "TradingView chart-data export is unavailable for this session. Use an authenticated account with chart export entitlement.",
         );
       }
-      const decline = page.getByRole("button", { name: /必要ありません|no thanks|not now/i });
+      const decline = page.getByRole("button", { name: /no thanks|not now/i });
       if ((await decline.count()) > 0) await decline.first().click();
       download = await this.#startDownload(page);
     }
@@ -873,7 +886,7 @@ export class TradingViewBrowserService {
   async #assertChartUsable(): Promise<void> {
     const page = this.#requirePage();
     const invalid = page.getByText(
-      /無効なシンボル|シンボルが見つかりません|invalid symbol|symbol not found/i,
+      /invalid symbol|symbol not found/i,
     );
     if ((await invalid.count()) > 0 && (await invalid.first().isVisible())) {
       throw new Error(`TradingView rejected symbol ${this.#symbol}.`);
@@ -882,7 +895,7 @@ export class TradingViewBrowserService {
 
   async #exportUpgradePromptVisible(page: Page): Promise<boolean> {
     const prompt = page.getByText(
-      /必要な場所にデータをエクスポート|プランをアップグレード|upgrade (?:your )?plan/i,
+      /upgrade (?:your )?plan/i,
     );
     return (await prompt.count()) > 0 && (await prompt.first().isVisible().catch(() => false));
   }
@@ -917,7 +930,7 @@ export class TradingViewBrowserService {
 
   async #startDownload(page: Page) {
     await this.#dismissTransientDialogs(page);
-    const manageLayout = page.getByRole("button", { name: /レイアウト管理|manage layout/i });
+    const manageLayout = page.getByRole("button", { name: /manage layout/i });
     try {
       await manageLayout.click({ timeout: Math.min(this.config.timeoutMs, 8_000) });
     } catch {
@@ -925,10 +938,10 @@ export class TradingViewBrowserService {
       await manageLayout.click({ force: true, timeout: this.config.timeoutMs });
     }
     const exportEntry = page
-      .getByRole("gridcell", { name: /チャートデータのダウンロード|download chart data/i })
+      .getByRole("gridcell", { name: /download chart data/i })
       .first();
     await exportEntry.click({ timeout: this.config.timeoutMs });
-    const downloadButton = page.getByRole("button", { name: /^(ダウンロード|download)$/i }).first();
+    const downloadButton = page.getByRole("button", { name: /^download$/i }).first();
     const downloadPromise = page
       .waitForEvent("download", { timeout: Math.min(this.config.timeoutMs, 10_000) })
       .catch(() => undefined);
@@ -946,10 +959,10 @@ export class TradingViewBrowserService {
     const scope = (await overlapRoot.count()) > 0 ? overlapRoot : page.locator("body");
     const candidates = [
       scope.getByRole("button", {
-        name: /^(閉じる|close|必要ありません|no thanks|not now|後で|maybe later|スキップ|skip)$/i,
+        name: /^(close|no thanks|not now|maybe later|skip)$/i,
       }),
       scope.locator(
-        'button[aria-label*="閉じる"], button[aria-label*="Close" i], [data-name="close"], [data-name="close-button"]',
+        'button[aria-label*="Close" i], [data-name="close"], [data-name="close-button"]',
       ),
     ];
     for (const candidate of candidates) {
@@ -976,17 +989,24 @@ export class TradingViewBrowserService {
   async #getContext(): Promise<BrowserContext> {
     if (this.#context) return this.#context;
     const storageState = this.config.authStatePath
-      ? await loadTradingViewStorageState(this.config.authStatePath)
+      ? await loadTradingViewStorageState(
+          this.config.authStatePath,
+          this.config.authCookieNames,
+          this.config.authStorageKeys,
+        )
       : undefined;
     const browser = await this.#getBrowser();
     this.#context = await browser.newContext({
       viewport: { width: 1_440, height: 900 },
-      locale: "ja-JP",
+      locale: "en-US",
       acceptDownloads: true,
       ...(storageState ? { storageState } : {}),
     });
     if (!this.config.authStatePath && this.config.cookieFile) {
-      const cookies = await loadCookieFile(this.config.cookieFile);
+      const cookies = await loadCookieFile(
+        this.config.cookieFile,
+        this.config.authCookieNames,
+      );
       await this.#context.addCookies(cookies);
     }
     return this.#context;
@@ -1001,7 +1021,7 @@ export class TradingViewBrowserService {
 
   async #waitForChart(page: Page): Promise<void> {
     await page
-      .getByRole("region", { name: /チャート|chart/i })
+      .getByRole("region", { name: /chart/i })
       .first()
       .waitFor({ state: "visible", timeout: this.config.timeoutMs });
   }
@@ -1017,7 +1037,7 @@ export class TradingViewBrowserService {
           Array.from(document.querySelectorAll<HTMLElement>("[aria-label]")).some((element) => {
             const label = (element.getAttribute("aria-label") ?? "").toUpperCase();
             return (
-              /CHART|チャート/i.test(label) &&
+              /CHART/i.test(label) &&
               label.includes(expectedTicker) &&
               (expectedExchange === undefined || label.includes(expectedExchange))
             );
@@ -1180,7 +1200,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
 
   async waitForStableChart(symbol: string, interval: CaptureInterval): Promise<void> {
     await this.page
-      .getByRole("region", { name: /チャート|chart/i })
+      .getByRole("region", { name: /chart/i })
       .first()
       .waitFor({ state: "visible" });
     await this.page.waitForFunction(
@@ -1208,7 +1228,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
         const normalizedSymbol = expectedSymbol.toUpperCase().replace(/\s+/g, "");
         const [exchange, ticker] = normalizedSymbol.split(":", 2);
         const chartRegions = Array.from(
-          document.querySelectorAll('[role="region"][aria-label*="chart" i], [role="region"][aria-label*="チャート"]'),
+          document.querySelectorAll('[role="region"][aria-label*="chart" i]'),
         ).filter(visible);
         const chartScope =
           chartRegions.length === 1
@@ -1245,12 +1265,12 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
         function browserIntervalLabelMatches(label: string, requested: string): boolean {
           const normalized = label.trim().replace(/\s+/g, " ");
           const patterns: Record<string, RegExp> = {
-            "5": /(?:5\s*分|(?:^|\b)5\s*(?:minutes?|mins?|min|m)(?:\b|$))/i,
-            "60": /(?:1\s*時間|60\s*分|(?:^|\b)(?:1\s*(?:hours?|hrs?|h)|60\s*(?:minutes?|mins?|min|m))(?:\b|$))/i,
-            "240": /(?:4\s*時間|240\s*分|(?:^|\b)(?:4\s*(?:hours?|hrs?|h)|240\s*(?:minutes?|mins?|min|m))(?:\b|$))/i,
-            D: /(?:1\s*日|日足|(?:^|\b)(?:1\s*day|daily|D)(?:\b|$))/i,
-            W: /(?:1\s*週|週足|(?:^|\b)(?:1\s*week|weekly|W)(?:\b|$))/i,
-            M: /(?:1\s*月|月足|(?:^|\b)(?:1\s*month|monthly|M)(?:\b|$))/i,
+            "5": /(?:^|\b)5\s*(?:minutes?|mins?|min|m)(?:\b|$)/i,
+            "60": /(?:^|\b)(?:1\s*(?:hours?|hrs?|h)|60\s*(?:minutes?|mins?|min|m))(?:\b|$)/i,
+            "240": /(?:^|\b)(?:4\s*(?:hours?|hrs?|h)|240\s*(?:minutes?|mins?|min|m))(?:\b|$)/i,
+            D: /(?:^|\b)(?:1\s*day|daily|D)(?:\b|$)/i,
+            W: /(?:^|\b)(?:1\s*week|weekly|W)(?:\b|$)/i,
+            M: /(?:^|\b)(?:1\s*month|monthly|M)(?:\b|$)/i,
           };
           return patterns[requested]?.test(normalized) ?? false;
         }
@@ -1269,7 +1289,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
         );
       };
       const charts = Array.from(
-        document.querySelectorAll('[role="region"][aria-label*="chart" i], [role="region"][aria-label*="チャート"]'),
+        document.querySelectorAll('[role="region"][aria-label*="chart" i]'),
       ).filter(visible);
       if (charts.length !== 1) return false;
       const scope =
@@ -1293,16 +1313,13 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
             }),
         );
       const priceAxisRendered = renderedAxis(
-        '[data-name^="price-axis" i], [class~="price-axis"], [class*="price-axis-container" i], [aria-label*="price axis" i], [aria-label*="価格軸"]',
+        '[data-name^="price-axis" i], [class~="price-axis"], [class*="price-axis-container" i], [aria-label*="price axis" i]',
       );
       const timeAxisRendered = renderedAxis(
-        '[data-name^="time-axis" i], [class~="time-axis"], [aria-label*="time axis" i], [aria-label*="時間軸"]',
+        '[data-name^="time-axis" i], [class~="time-axis"], [aria-label*="time axis" i]',
       );
       const ohlc =
         /(?:^|\s)O\s*[-+\d,.]+\s+H\s*[-+\d,.]+\s+L\s*[-+\d,.]+\s+C\s*[-+\d,.]+/i.test(
-          text,
-        ) ||
-        /始値\s*[-+\d,.]+.{0,40}高値\s*[-+\d,.]+.{0,40}安値\s*[-+\d,.]+.{0,40}終値\s*[-+\d,.]+/s.test(
           text,
         );
       const loading = Array.from(
@@ -1315,7 +1332,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
     await this.page.waitForTimeout(300);
     await this.page.waitForFunction(() => {
       const chart = document.querySelector<HTMLElement>(
-        '[role="region"][aria-label*="chart" i], [role="region"][aria-label*="チャート"]',
+        '[role="region"][aria-label*="chart" i]',
       );
       const scope =
         chart?.closest('[class*="layout__area--center"]') ??
@@ -1410,12 +1427,12 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
       const intervalMatches = (label: string, requested: string): boolean => {
         const normalized = label.trim().replace(/\s+/g, " ");
         const patterns: Record<string, RegExp> = {
-          "5": /(?:5\s*分|(?:^|\b)5\s*(?:minutes?|mins?|min|m)(?:\b|$))/i,
-          "60": /(?:1\s*時間|60\s*分|(?:^|\b)(?:1\s*(?:hours?|hrs?|h)|60\s*(?:minutes?|mins?|min|m))(?:\b|$))/i,
-          "240": /(?:4\s*時間|240\s*分|(?:^|\b)(?:4\s*(?:hours?|hrs?|h)|240\s*(?:minutes?|mins?|min|m))(?:\b|$))/i,
-          D: /(?:1\s*日|日足|(?:^|\b)(?:1\s*day|daily|D)(?:\b|$))/i,
-          W: /(?:1\s*週|週足|(?:^|\b)(?:1\s*week|weekly|W)(?:\b|$))/i,
-          M: /(?:1\s*月|月足|(?:^|\b)(?:1\s*month|monthly|M)(?:\b|$))/i,
+          "5": /(?:^|\b)5\s*(?:minutes?|mins?|min|m)(?:\b|$)/i,
+          "60": /(?:^|\b)(?:1\s*(?:hours?|hrs?|h)|60\s*(?:minutes?|mins?|min|m))(?:\b|$)/i,
+          "240": /(?:^|\b)(?:4\s*(?:hours?|hrs?|h)|240\s*(?:minutes?|mins?|min|m))(?:\b|$)/i,
+          D: /(?:^|\b)(?:1\s*day|daily|D)(?:\b|$)/i,
+          W: /(?:^|\b)(?:1\s*week|weekly|W)(?:\b|$)/i,
+          M: /(?:^|\b)(?:1\s*month|monthly|M)(?:\b|$)/i,
         };
         return patterns[requested]?.test(normalized) ?? false;
       };
@@ -1427,7 +1444,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
       const chartCandidates = Array.from(
         document.querySelectorAll('[role="region"][aria-label]'),
       ).filter(
-        (element) => visible(element) && /chart|チャート/i.test(element.getAttribute("aria-label") ?? ""),
+        (element) => visible(element) && /chart/i.test(element.getAttribute("aria-label") ?? ""),
       );
       const charts = chartCandidates.filter((element, index) =>
         chartCandidates.findIndex((candidate) => candidate === element) === index,
@@ -1481,24 +1498,20 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
         'button[data-name="header-chart-type"]',
         'button[data-name="series-properties"]',
         '[data-name*="chart-type"][role="button"]',
-        'button[aria-label*="ローソク足"]',
         'button[aria-label*="candl" i]',
       ]);
       const authenticatedControl = firstVisible(document, [
-        'button[aria-label*="ログインユーザー"]',
         'button[aria-label*="logged-in user" i]',
       ]);
       const timezoneControl = firstVisible(scope, [
         'button[data-name*="timezone" i]',
         '[data-name*="timezone" i][role="button"]',
         'button[aria-label*="timezone" i]',
-        'button[aria-label*="タイムゾーン"]',
       ]);
       const sessionControl = firstVisible(scope, [
         'button[data-name*="session" i]',
         '[data-name*="session" i][role="button"]',
         'button[aria-label*="session" i]',
-        'button[aria-label*="取引時間"]',
       ]);
       const mainLegend = firstVisible(scope, ['[data-qa-id="legend-series-item"]']);
       const realtimeControl = mainLegend
@@ -1513,11 +1526,8 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
           'button[data-name*="back-adjust" i]',
           '[data-name*="back-adjust" i][role="button"]',
           'button[aria-label*="back adjustment" i]',
-          'button[aria-label*="バックアジャスト"]',
-          'button[aria-label*="限月調整"]',
-          'button[aria-label*="限月の切り替えを調整"]',
         ],
-        /back.?adjust|B-?ADJ|バックアジャスト|限月調整/i,
+        /back.?adjust|B-?ADJ/i,
         "explicit back-adjustment control",
       );
       const settlementAsClose = control(
@@ -1526,9 +1536,8 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
           'button[data-name*="settlement" i]',
           '[data-name*="settlement" i][role="button"]',
           'button[aria-label*="settlement" i]',
-          'button[aria-label*="清算値"]',
         ],
-        /settlement.{0,20}close|SET|清算値.{0,20}終値|終値.{0,20}清算値/i,
+        /settlement.{0,20}close|SET/i,
         "explicit settlement-as-close control",
       );
 
@@ -1549,24 +1558,21 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
             }),
         );
       const priceAxisRendered = renderedAxis(
-        '[data-name^="price-axis" i], [class~="price-axis"], [class*="price-axis-container" i], [aria-label*="price axis" i], [aria-label*="価格軸"]',
+        '[data-name^="price-axis" i], [class~="price-axis"], [class*="price-axis-container" i], [aria-label*="price axis" i]',
       );
       const timeAxisRendered = renderedAxis(
-        '[data-name^="time-axis" i], [class~="time-axis"], [aria-label*="time axis" i], [aria-label*="時間軸"]',
+        '[data-name^="time-axis" i], [class~="time-axis"], [aria-label*="time axis" i]',
       );
       const axisEvidenceCount = Number(priceAxisRendered) + Number(timeAxisRendered);
       const ohlcEvidenceVisible =
         /(?:^|\s)O\s*[-+\d,.]+\s+H\s*[-+\d,.]+\s+L\s*[-+\d,.]+\s+C\s*[-+\d,.]+/i.test(
-          chartText,
-        ) ||
-        /始値\s*[-+\d,.]+.{0,40}高値\s*[-+\d,.]+.{0,40}安値\s*[-+\d,.]+.{0,40}終値\s*[-+\d,.]+/s.test(
           chartText,
         );
       const loadingVisible = Array.from(
         scope.querySelectorAll(
           '[aria-busy="true"], [role="progressbar"], [data-name*="loading" i], [class*="loading" i]',
         ),
-      ).some(visible) || /(?:^|\s)(?:Loading|読み込み中)(?:\.{0,3}|\s|$)/i.test(chartText);
+      ).some(visible) || /(?:^|\s)Loading(?:\.{0,3}|\s|$)/i.test(chartText);
       const allLegendContainers = Array.from(
         scope.querySelectorAll(
           '[data-name="legend"], [data-name*="chart-legend" i], [data-name*="pane-legend" i]',
@@ -1637,7 +1643,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
             ? "pine"
             : studyId && /^(?:STD;)|ichimoku|builtin|built-in/i.test(studyId)
               ? "builtin"
-              : /built-?in|標準インジケーター/i.test(text)
+              : /built-?in/i.test(text)
                 ? "builtin"
                 : "unknown";
         const identity = pineId ?? scriptId ?? studyId;
@@ -1657,7 +1663,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
       const drawingInventoryRoot = firstVisible(
         document,
         [
-          '[data-name="tree"][data-codex-capture-audit-root="object-tree"]',
+          '[data-name="tree"][data-tradingview-mcp-audit-root="object-tree"]',
           '[data-name="tree"]',
         ],
       );
@@ -1684,7 +1690,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
       if (drawingInventoryRoot?.matches('[data-name="tree"]')) {
         const objectRows = Array.from(
           drawingInventoryRoot.querySelectorAll(
-            '[class^="listContainer-"] > div > div, [role="treeitem"], [data-codex-object-tree-row]',
+            '[class^="listContainer-"] > div > div, [role="treeitem"], [data-tradingview-mcp-object-tree-row]',
           ),
         )
           .filter(visible)
@@ -1704,7 +1710,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
           }))
           .filter((item) => item.text.length > 0);
         const mainRows = objectRows.filter((item) =>
-          /^(?:NK2251!\s*[·・]\s*OSE|OSE:NK2251!)(?:\s*,\s*\S+)?$/i.test(item.text),
+          /^(?:NK2251!\s*[-/]\s*OSE|OSE:NK2251!)(?:\s*,\s*\S+)?$/i.test(item.text),
         );
         const nonMainRows = objectRows.filter((item) => !mainRows.includes(item));
         const legendStudies = studies;
@@ -1766,7 +1772,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
             continue;
           }
           const comparisonMatch = item.text.match(
-            /^([A-Z0-9._!+-]+)\s*[·・]\s*([A-Z][A-Z0-9._+-]+)(?:\s*,|$)/i,
+            /^([A-Z0-9._!+-]+)\s*[-/]\s*([A-Z][A-Z0-9._+-]+)(?:\s*,|$)/i,
           );
           if (comparisonMatch) {
             comparisons.push({
@@ -1778,7 +1784,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
             continue;
           }
           if (
-            /^(?:出来高|Volume|SMA|EMA|WMA|BB|Bollinger|MACD|RSI|Ichimoku|一目均衡表|VWAP|ATR|Stoch|ストキャス|移動平均)/i.test(
+            /^(?:Volume|SMA|EMA|WMA|BB|Bollinger|MACD|RSI|Ichimoku|VWAP|ATR|Stoch)/i.test(
               item.text,
             )
           ) {
@@ -1792,7 +1798,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
             continue;
           }
           if (
-            /trend\s*line|horizontal|vertical|ray|rectangle|ellipse|fibonacci|pitchfork|text|arrow|brush|トレンドライン|水平線|垂直線|四角|フィボナッチ|テキスト|矢印|ブラシ/i.test(
+            /trend\s*line|horizontal|vertical|ray|rectangle|ellipse|fibonacci|pitchfork|text|arrow|brush/i.test(
               item.text,
             )
           ) {
@@ -1876,15 +1882,15 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
         authenticatedSelector: authenticatedControl ? "visible authenticated-account control" : null,
         delayedLabelVisible:
           realtimeControl !== null &&
-          /遅延データ|\b遅延\b|データは\s*\d+\s*分遅延|delayed\s+data|data\s+is\s+delayed/i.test(
+          /delayed\s+data|data\s+is\s+delayed/i.test(
             describe(realtimeControl),
           ),
         realtimeLabel: realtimeControl ? describe(realtimeControl) : null,
         realtimeSelector: realtimeControl ? "main-series market-data status control" : null,
         realtimeActive: realtimeControl
-          ? /real[ -]?time|realtime|リアルタイム/i.test(describe(realtimeControl))
+          ? /real[ -]?time|realtime/i.test(describe(realtimeControl))
             ? true
-            : /遅延|delayed/i.test(describe(realtimeControl))
+            : /delayed/i.test(describe(realtimeControl))
               ? false
               : explicitActive(realtimeControl)
           : null,
@@ -1986,9 +1992,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
         'button[data-name="object-tree"]',
         'button[data-name="object-tree-button"]',
         'button[aria-label*="Object Tree" i]',
-        'button[aria-label*="オブジェクトツリー"]',
         '[role="button"][aria-label*="Object Tree" i]',
-        '[role="button"][aria-label*="オブジェクトツリー"]',
       ].join(", "),
     );
     if (!objectTreeButton) {
@@ -2006,7 +2010,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
       );
     }
     await objectTreeRoot.evaluate((element) => {
-      element.setAttribute("data-codex-capture-audit-root", "object-tree");
+      element.setAttribute("data-tradingview-mcp-audit-root", "object-tree");
     });
 
     let inventory = await this.observe(interval, expectedIndicator);
@@ -2062,8 +2066,6 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
         'button[data-name="header-toolbar-properties"]',
         'button[aria-label*="Chart settings" i]',
         'button[aria-label*="Chart Settings" i]',
-        'button[aria-label*="チャート設定"]',
-        'button[aria-label^="設定"]',
       ].join(", "),
     );
     if (!settingsButton) {
@@ -2073,7 +2075,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
     }
     await this.#safeClick(settingsButton, `open chart settings ${interval}`);
     const settingsDialog = await this.#waitForVisibleLocator(
-      '[role="dialog"]:has-text("Settings"), [role="dialog"]:has-text("設定")',
+      '[role="dialog"]:has-text("Settings")',
     );
     if (!settingsDialog) {
       throw new Error(
@@ -2081,7 +2083,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
       );
     }
     const symbolTab = await this.#firstVisibleLocator(
-      '[role="tab"]:text-is("Symbol"), [role="tab"]:text-is("シンボル")',
+      '[role="tab"]:text-is("Symbol")',
       settingsDialog,
     );
     if (symbolTab) await this.#safeClick(symbolTab, `open symbol settings ${interval}`);
@@ -2185,10 +2187,10 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
       ): TradingViewCaptureControlObservation | null =>
         element ? { selector, label: describe(element), active: active(element) } : null;
       const backAdjustment = find(
-        /back.?adjust|adjustment\s+for\s+contract\s+changes|B-?ADJ|バックアジャスト|限月調整|限月の切り替えを調整/i,
+        /back.?adjust|adjustment\s+for\s+contract\s+changes|B-?ADJ/i,
       );
       const settlementAsClose = find(
-        /settlement.{0,30}close|use\s+settlement.{0,20}close|清算値.{0,30}終値|終値.{0,30}清算値/i,
+        /settlement.{0,30}close|use\s+settlement.{0,20}close/i,
       );
       return {
         backAdjustment: asControl(backAdjustment, "opened settings back-adjustment control"),
@@ -2215,7 +2217,6 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
         'button[data-name="time-zone-menu"]',
         'button[data-name*="timezone" i]',
         'button[aria-label*="timezone" i]',
-        'button[aria-label*="タイムゾーン"]',
       ].join(", "),
     );
     if (!button) {
@@ -2226,13 +2227,9 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
     await this.#safeClick(button, `open timezone menu ${interval}`);
     const menu = await this.#waitForVisibleLocator(
       [
-        '[data-codex-timezone-menu]:has-text("東京")',
-        '[data-codex-timezone-menu]:has-text("Tokyo")',
-        '[role="listbox"]:has-text("東京")',
+        '[data-tradingview-mcp-timezone-menu]:has-text("Tokyo")',
         '[role="listbox"]:has-text("Tokyo")',
-        '[role="menu"]:has-text("東京")',
         '[role="menu"]:has-text("Tokyo")',
-        'div[class*="menuWrap-"]:has-text("東京")',
         'div[class*="menuWrap-"]:has-text("Tokyo")',
       ].join(", "),
     );
@@ -2278,7 +2275,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
       );
       const matches = leaves.filter(
         (element) =>
-          /^(?:\(UTC\+0?9(?::00)?\)\s*)?(?:東京|Tokyo)$|^Asia\/Tokyo$/i.test(
+          /^(?:\(UTC\+0?9(?::00)?\)\s*)?Tokyo$|^Asia\/Tokyo$/i.test(
             normalized(element),
           ) && selected(element),
       );
@@ -2304,7 +2301,6 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
         'button[data-name="session-menu"]',
         'button[data-name*="session" i]',
         'button[aria-label*="session" i]',
-        'button[aria-label*="取引時間"]',
       ].join(", "),
     );
     if (!button) {
@@ -2315,14 +2311,10 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
     await this.#safeClick(button, `open session menu ${interval}`);
     const menu = await this.#waitForVisibleLocator(
       [
-        '[data-codex-session-menu]:has-text("Day session")',
-        '[data-codex-session-menu]:has-text("日中取引時間"):has-text("夜間取引時間")',
+        '[data-tradingview-mcp-session-menu]:has-text("Day session")',
         '[role="listbox"]:has-text("Day session")',
-        '[role="listbox"]:has-text("日中取引時間"):has-text("夜間取引時間")',
         '[role="menu"]:has-text("Day session")',
-        '[role="menu"]:has-text("日中取引時間"):has-text("夜間取引時間")',
         'div[class*="menuWrap-"]:has-text("Day session")',
-        'div[class*="menuWrap-"]:has-text("日中取引時間"):has-text("夜間取引時間")',
       ].join(", "),
     );
     if (!menu) {
@@ -2368,14 +2360,14 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
           ),
       );
       const day = leaves.find((element) =>
-        /^(?:Day session trading hours|日中取引時間|日中セッション)$/i.test(normalized(element)),
+        /^Day session trading hours$/i.test(normalized(element)),
       );
       const night = leaves.find((element) =>
-        /^(?:Night session trading hours|夜間取引時間|夜間セッション)$/i.test(normalized(element)),
+        /^Night session trading hours$/i.test(normalized(element)),
       );
       const combined = leaves.filter(
         (element) =>
-          /^(?:電子取引時間|Electronic trading hours|Full OSE day and night session|OSE full day and night session)$/i.test(
+          /^(?:Electronic trading hours|Full OSE day and night session|OSE full day and night session)$/i.test(
             normalized(element),
           ) && selected(element),
       );
@@ -2436,7 +2428,7 @@ export class PlaywrightTradingViewCaptureDriver implements TradingViewCaptureDri
           const item = objectRows.nth(index);
           if (!(await item.isVisible().catch(() => false))) continue;
           const text = (await item.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
-          if (!text || /^NK2251!\s*[·・]\s*OSE(?:\s*,\s*\S+)?$/i.test(text)) continue;
+          if (!text || /^NK2251!\s*[-/]\s*OSE(?:\s*,\s*\S+)?$/i.test(text)) continue;
           candidate = item;
           break;
         }
@@ -2610,10 +2602,10 @@ function classifyCaptureObservation(
 
   const chartTypeLabel = requiredObservedText(raw.chartTypeLabel, "chart type label");
   if (
-    /heikin|平均足|hollow|中空|line|ライン|area|エリア|renko|レンコ|kagi|カギ|point.{0,4}figure|新値足/i.test(
+    /heikin|hollow|line|area|renko|kagi|point.{0,4}figure/i.test(
       chartTypeLabel,
     ) ||
-    !/(?:^|[^A-Za-z])(?:candlesticks?|candles?)(?:$|[^A-Za-z])|ローソク足/i.test(chartTypeLabel)
+    !/(?:^|[^A-Za-z])(?:candlesticks?|candles?)(?:$|[^A-Za-z])/i.test(chartTypeLabel)
   ) {
     throw new Error(
       `TradingView capture rejected ${interval}: chart type is not proven to be standard candlesticks.`,
@@ -2631,7 +2623,7 @@ function classifyCaptureObservation(
   if (
     !raw.realtimeSelector ||
     raw.realtimeActive !== true ||
-    !/(?:^|[^A-Za-z])(?:real[ -]?time|realtime)(?:$|[^A-Za-z])|リアルタイム/i.test(
+    !/(?:^|[^A-Za-z])(?:real[ -]?time|realtime)(?:$|[^A-Za-z])/i.test(
       realtimeLabel,
     )
   ) {
@@ -2641,7 +2633,7 @@ function classifyCaptureObservation(
   }
 
   const timezoneLabel = requiredObservedText(raw.timezoneLabel, "timezone label");
-  if (!/(?:^|[^A-Za-z])(?:Asia\/Tokyo|Tokyo)(?:$|[^A-Za-z])|東京/i.test(timezoneLabel)) {
+  if (!/(?:^|[^A-Za-z])(?:Asia\/Tokyo|Tokyo)(?:$|[^A-Za-z])/i.test(timezoneLabel)) {
     throw new Error(
       `TradingView capture rejected ${interval}: Asia/Tokyo is not proven by the timezone UI.`,
     );
@@ -2649,10 +2641,10 @@ function classifyCaptureObservation(
   const sessionLabel = requiredObservedText(raw.sessionLabel, "session label");
   if (
     !(
-      /OSE.{0,40}(?:日中.{0,20}夜間|day.{0,20}night)|OSE\s+full\s+day\s+and\s+night\s+session/i.test(
+      /OSE.{0,40}day.{0,20}night|OSE\s+full\s+day\s+and\s+night\s+session/i.test(
         sessionLabel,
       ) ||
-      /OSE full day-and-night proven by active (?:電子取引時間|Electronic trading hours|Full OSE day and night session|OSE full day and night session);\s*separate options:\s*(?:Day session trading hours|日中取引時間|日中セッション);\s*(?:Night session trading hours|夜間取引時間|夜間セッション)/i.test(
+      /OSE full day-and-night proven by active (?:Electronic trading hours|Full OSE day and night session|OSE full day and night session);\s*separate options:\s*Day session trading hours;\s*Night session trading hours/i.test(
         sessionLabel,
       )
     )
@@ -2814,12 +2806,12 @@ function classifyCaptureObservation(
 function captureIntervalFromLabel(label: string): CaptureInterval | undefined {
   const normalized = label.trim().replace(/\s+/g, " ");
   const candidates: Array<[CaptureInterval, RegExp]> = [
-    ["240", /(?:4\s*時間|240\s*分|(?:^|\b)(?:4\s*(?:hours?|hrs?|h)|240\s*(?:minutes?|mins?|min|m))(?:\b|$))/i],
-    ["60", /(?:1\s*時間|60\s*分|(?:^|\b)(?:1\s*(?:hours?|hrs?|h)|60\s*(?:minutes?|mins?|min|m))(?:\b|$))/i],
-    ["5", /(?:5\s*分|(?:^|\b)5\s*(?:minutes?|mins?|min|m)(?:\b|$))/i],
-    ["D", /(?:1\s*日|日足|(?:^|\b)(?:1\s*day|daily|D)(?:\b|$))/i],
-    ["W", /(?:1\s*週|週足|(?:^|\b)(?:1\s*week|weekly|W)(?:\b|$))/i],
-    ["M", /(?:1\s*月|月足|(?:^|\b)(?:1\s*month|monthly|M)(?:\b|$))/i],
+    ["240", /(?:^|\b)(?:4\s*(?:hours?|hrs?|h)|240\s*(?:minutes?|mins?|min|m))(?:\b|$)/i],
+    ["60", /(?:^|\b)(?:1\s*(?:hours?|hrs?|h)|60\s*(?:minutes?|mins?|min|m))(?:\b|$)/i],
+    ["5", /(?:^|\b)5\s*(?:minutes?|mins?|min|m)(?:\b|$)/i],
+    ["D", /(?:^|\b)(?:1\s*day|daily|D)(?:\b|$)/i],
+    ["W", /(?:^|\b)(?:1\s*week|weekly|W)(?:\b|$)/i],
+    ["M", /(?:^|\b)(?:1\s*month|monthly|M)(?:\b|$)/i],
   ];
   return candidates.find(([, pattern]) => pattern.test(normalized))?.[0];
 }
@@ -3519,16 +3511,47 @@ function canonicalJson(value: unknown): string {
 
 export async function loadTradingViewStorageState(
   file: string,
+  allowedCookieNames: readonly string[] = DEFAULT_TRADINGVIEW_AUTH_COOKIE_NAMES,
+  allowedStorageKeys: readonly string[] = [],
 ): Promise<TradingViewStorageState> {
-  return filterTradingViewStorageState(parseStorageState(await readFile(file, "utf8")));
+  const state = filterTradingViewStorageState(
+    parseStorageState(await readPrivateAuthenticationFile(file)),
+    allowedCookieNames,
+    allowedStorageKeys,
+  );
+  assertAuthenticationCookiesPresent(state.cookies, allowedCookieNames);
+  return state;
 }
 
 export function filterTradingViewStorageState(
   state: TradingViewStorageState,
+  allowedCookieNames: readonly string[] = DEFAULT_TRADINGVIEW_AUTH_COOKIE_NAMES,
+  allowedStorageKeys: readonly string[] = [],
 ): TradingViewStorageState {
+  const cookieNames = new Set(allowedCookieNames.map((name) => name.toLowerCase()));
+  const storageKeys = new Set(allowedStorageKeys.map((name) => name.toLowerCase()));
   return {
-    cookies: state.cookies.filter((cookie) => allowedCookieDomain(cookie.domain)),
-    origins: state.origins.filter((origin) => allowedStorageOrigin(origin.origin)),
+    cookies: state.cookies.filter(
+      (cookie) =>
+        allowedCookieDomain(cookie.domain) &&
+        cookieNames.has(cookie.name.toLowerCase()) &&
+        cookie.value.length > 0 &&
+        Buffer.byteLength(cookie.value, "utf8") <= MAX_COOKIE_VALUE_BYTES &&
+        !(cookie.expires > 0 && cookie.expires <= Date.now() / 1_000),
+    ),
+    origins: storageKeys.size === 0
+      ? []
+      : state.origins
+          .filter((origin) => allowedStorageOrigin(origin.origin))
+          .map((origin) => ({
+            origin: origin.origin,
+            localStorage: origin.localStorage.filter(
+              (item) =>
+                storageKeys.has(item.name.toLowerCase()) &&
+                Buffer.byteLength(item.value, "utf8") <= MAX_STORAGE_VALUE_BYTES,
+            ),
+          }))
+          .filter((origin) => origin.localStorage.length > 0),
   };
 }
 
@@ -3554,7 +3577,7 @@ export async function createIsolatedTradingViewCaptureContext(
 ): Promise<BrowserContext> {
   return browser.newContext({
     viewport,
-    locale: "ja-JP",
+    locale: "en-US",
     acceptDownloads: false,
     serviceWorkers: "block",
     ...(storageState
@@ -3563,22 +3586,38 @@ export async function createIsolatedTradingViewCaptureContext(
   });
 }
 
-export async function loadTradingViewCookies(file: string): Promise<Cookie[]> {
-  const source = await readFile(file, "utf8");
+export async function loadTradingViewCookies(
+  file: string,
+  allowedCookieNames: readonly string[] = DEFAULT_TRADINGVIEW_AUTH_COOKIE_NAMES,
+): Promise<Cookie[]> {
+  const source = await readPrivateAuthenticationFile(file);
   const trimmed = source.trim();
   if (trimmed.startsWith("{")) {
-    return parseStorageState(source).cookies.filter((cookie) =>
-      allowedCookieDomain(cookie.domain),
-    );
+    const cookies = filterTradingViewStorageState(
+      parseStorageState(source),
+      allowedCookieNames,
+      [],
+    ).cookies;
+    assertAuthenticationCookiesPresent(cookies, allowedCookieNames);
+    return cookies;
   }
 
+  const cookieNames = new Set(allowedCookieNames.map((name) => name.toLowerCase()));
   const cookies: Cookie[] = [];
   for (const line of source.split(/\r?\n/)) {
     if (!line.trim() || line.startsWith("#")) continue;
     const fields = line.split("\t");
     if (fields.length < 5) continue;
     const [name, value, domain, cookiePath, expiresText] = fields;
-    if (!name || value === undefined || !domain || !allowedCookieDomain(domain)) continue;
+    if (
+      !name ||
+      value === undefined ||
+      !domain ||
+      !allowedCookieDomain(domain) ||
+      !cookieNames.has(name.toLowerCase()) ||
+      value.length === 0 ||
+      Buffer.byteLength(value, "utf8") > MAX_COOKIE_VALUE_BYTES
+    ) continue;
     const expiresMs = Date.parse(expiresText ?? "");
     const sameSite = ["Strict", "Lax", "None"].includes(fields[8] ?? "")
       ? (fields[8] as Cookie["sameSite"])
@@ -3589,40 +3628,118 @@ export async function loadTradingViewCookies(file: string): Promise<Cookie[]> {
       domain,
       path: cookiePath || "/",
       expires: Number.isFinite(expiresMs) ? Math.trunc(expiresMs / 1_000) : -1,
-      httpOnly: fields[6] === "✓" || fields[6]?.toLowerCase() === "true",
+      httpOnly: fields[6]?.toLowerCase() === "true",
       secure: true,
       sameSite,
     });
   }
-  if (cookies.length === 0) throw new Error("Cookie file contains no TradingView cookies.");
+  assertAuthenticationCookiesPresent(cookies, allowedCookieNames);
   return cookies;
 }
 
-async function loadCookieFile(file: string): Promise<Cookie[]> {
-  return loadTradingViewCookies(file);
+async function loadCookieFile(
+  file: string,
+  allowedCookieNames: readonly string[],
+): Promise<Cookie[]> {
+  return loadTradingViewCookies(file, allowedCookieNames);
+}
+
+async function readPrivateAuthenticationFile(file: string): Promise<string> {
+  try {
+    const target = await realpath(file);
+    const info = await stat(target);
+    if (!info.isFile() || info.size === 0 || info.size > MAX_AUTH_FILE_BYTES) {
+      throw new Error("unsafe authentication file shape");
+    }
+    if (process.platform !== "win32") {
+      const currentUserId = process.getuid?.();
+      if ((info.mode & 0o077) !== 0 || (currentUserId !== undefined && info.uid !== currentUserId)) {
+        throw new Error("unsafe authentication file ownership or permissions");
+      }
+    }
+    return await readFile(target, "utf8");
+  } catch {
+    throw new Error(
+      "TradingView authentication could not be loaded safely. Use a non-empty file smaller than 1 MiB with owner-only permissions.",
+    );
+  }
+}
+
+function assertAuthenticationCookiesPresent(
+  cookies: readonly Cookie[],
+  allowedCookieNames: readonly string[],
+): void {
+  if (cookies.length > 0) return;
+  throw new Error(
+    `Authentication input contains no current TradingView cookies allowed by TRADINGVIEW_BROWSER_AUTH_COOKIE_NAMES (${allowedCookieNames.join(",")}).`,
+  );
 }
 
 function parseStorageState(source: string): TradingViewStorageState {
-  const parsed = JSON.parse(source) as Partial<TradingViewStorageState>;
+  const parsed = JSON.parse(source) as { cookies?: unknown; origins?: unknown };
   if (!Array.isArray(parsed.cookies)) {
     throw new Error("Storage-state JSON must contain a cookies array.");
   }
   return {
-    cookies: parsed.cookies.filter(
-      (cookie): cookie is Cookie =>
-        typeof cookie === "object" &&
-        cookie !== null &&
-        typeof cookie.domain === "string",
-    ),
+    cookies: parsed.cookies.flatMap((cookie) => {
+      const sanitized = parseCookie(cookie);
+      return sanitized ? [sanitized] : [];
+    }),
     origins: Array.isArray(parsed.origins)
-      ? parsed.origins.filter(
-          (origin): origin is TradingViewStorageState["origins"][number] =>
-            typeof origin === "object" &&
-            origin !== null &&
-            typeof origin.origin === "string" &&
-            Array.isArray(origin.localStorage),
-        )
+      ? parsed.origins.flatMap((origin) => {
+          if (
+            typeof origin !== "object" ||
+            origin === null ||
+            !("origin" in origin) ||
+            typeof origin.origin !== "string" ||
+            !("localStorage" in origin) ||
+            !Array.isArray(origin.localStorage)
+          ) return [];
+          const localStorage = origin.localStorage.filter(
+            (item: unknown): item is { name: string; value: string } =>
+              typeof item === "object" &&
+              item !== null &&
+              "name" in item &&
+              typeof item.name === "string" &&
+              "value" in item &&
+              typeof item.value === "string",
+          );
+          return [{ origin: origin.origin, localStorage }];
+        })
       : [],
+  };
+}
+
+function parseCookie(value: unknown): Cookie | undefined {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("name" in value) ||
+    typeof value.name !== "string" ||
+    !("value" in value) ||
+    typeof value.value !== "string" ||
+    !("domain" in value) ||
+    typeof value.domain !== "string"
+  ) return undefined;
+  const sameSite =
+    "sameSite" in value && ["Strict", "Lax", "None"].includes(String(value.sameSite))
+      ? String(value.sameSite) as Cookie["sameSite"]
+      : "Lax";
+  const expires =
+    "expires" in value && typeof value.expires === "number" && Number.isFinite(value.expires)
+      ? value.expires
+      : -1;
+  return {
+    name: value.name,
+    value: value.value,
+    domain: value.domain,
+    path: "path" in value && typeof value.path === "string" && value.path.startsWith("/")
+      ? value.path
+      : "/",
+    expires,
+    httpOnly: "httpOnly" in value && value.httpOnly === true,
+    secure: true,
+    sameSite,
   };
 }
 

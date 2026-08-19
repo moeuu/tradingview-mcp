@@ -4,16 +4,21 @@ This service uses Playwright to operate the official TradingView Supercharts UI.
 
 ## Authentication
 
-Enable the browser and provide either a Playwright storage-state JSON file or a tab-separated browser-cookie export:
+Enable the browser and provide one authentication source. A minimal cookie export is preferred over a full browser profile or storage-state export:
 
 ```bash
 export TRADINGVIEW_BROWSER_ENABLED=true
 export TRADINGVIEW_BROWSER_BASE_URL=https://www.tradingview.com
-export TRADINGVIEW_BROWSER_AUTH_STATE=/absolute/path/state.json
-# or: TRADINGVIEW_BROWSER_COOKIE_FILE=/absolute/path/cookies.txt
+export TRADINGVIEW_BROWSER_COOKIE_FILE=/absolute/path/cookies.txt
+export TRADINGVIEW_BROWSER_AUTH_COOKIE_NAMES=sessionid,sessionid_sign,device_t
+# Alternative source: TRADINGVIEW_BROWSER_AUTH_STATE=/absolute/path/state.json
 ```
 
-Only `tradingview.com` cookie domains are imported. For Playwright storage-state files, non-TradingView cookies and non-TradingView local-storage origins are removed before the browser context is created. Keep authentication files outside Git, make them readable only by the account running the service, and rotate them if they have been pasted into chat, logs, or a shell history.
+Only the configured cookie names from `tradingview.com` domains are imported. The default allowlist is `sessionid`, `sessionid_sign`, and `device_t`; unrelated preference, analytics, and third-party cookies are discarded. Expired, empty, or oversized cookies are discarded. The file must be non-empty, smaller than 1 MiB, and owner-only on POSIX systems.
+
+Storage-state local storage is removed by default, including data from valid TradingView origins. A workflow can opt in to individual keys with a comma-separated `TRADINGVIEW_BROWSER_AUTH_STORAGE_KEYS` allowlist. Configure only one of `TRADINGVIEW_BROWSER_AUTH_STATE` and `TRADINGVIEW_BROWSER_COOKIE_FILE`.
+
+Authentication values are never accepted through MCP or REST arguments, returned in results, written back to disk, or included in reported capabilities. Keep the source file outside Git and rotate the session if its values have been pasted into chat, logs, client configuration, or shell history.
 
 ## MCP workflow
 
@@ -73,7 +78,7 @@ Content-Type: application/json
 {"width":1440,"height":900,"chartOnly":true}
 ```
 
-The snapshot response is raw `image/png`, not a JSON/base64 wrapper. Width is limited to 640–2560 and height to 480–1800. All three routes retain the API's loopback Host restriction, cross-site rejection, optional Bearer-token requirement, and `Cache-Control: no-store`. Open/state responses contain chart metadata only; request schemas reject cookie or storage-state fields.
+The snapshot response is raw `image/png`, not a JSON/base64 wrapper. Width is limited to 640-2560 and height to 480-1800. All three routes retain the API's loopback Host restriction, cross-site rejection, optional Bearer-token requirement, and `Cache-Control: no-store`. Open/state responses contain chart metadata only; request schemas reject cookie or storage-state fields.
 
 ### Optional hardened Nikkei 225 capture preset
 
@@ -123,7 +128,7 @@ and no upgrade action is attempted. One-minute history remains available through
 
 - TradingView account-plan, exchange entitlement, export availability, and delayed/live status remain authoritative.
 - A session with chart-data export entitlement is required; an anonymous Basic session can open the export dialog but cannot download its CSV.
-- The browser waits for accessible chart controls and supports Japanese and English labels. UI changes can require selector maintenance.
+- The browser uses the English TradingView origin and `en-US` browser locale. UI changes can require selector maintenance.
 - Exports are capped at 50 MB and saved below `MARKET_CHART_DATA_ROOT/tradingview-exports`.
 - Archive writes use a temporary file followed by an atomic rename; output names cannot contain directories.
 - An export over 10,000 bars is kept intact; only its most recent 10,000 bars are loaded into the local Lightweight Charts view.

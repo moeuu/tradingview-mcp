@@ -86,8 +86,8 @@ async function refresh(): Promise<void> {
   pollInFlight = true;
 
   if (currentRevision === null) {
-    setConnectionState("loading", "データを接続中");
-    setDataState("loading", "同期中");
+    setConnectionState("loading", "Connecting to data");
+    setDataState("loading", "Syncing");
   }
 
   try {
@@ -108,21 +108,21 @@ async function refresh(): Promise<void> {
       updateStateMetadata(state);
     }
 
-    setConnectionState("online", "接続済み");
-    setDataState("online", "正常");
+    setConnectionState("online", "Connected");
+    setDataState("online", "Healthy");
 
     if (analysisResult.status === "fulfilled") {
       const analysis = parseAnalysis(analysisResult.value);
       if (analysis !== null) renderAnalysis(analysis);
-      else renderAnalysisError("分析レスポンスの形式を確認できませんでした。");
+      else renderAnalysisError("The analysis response format was invalid.");
     } else {
       renderAnalysisError(errorMessage(analysisResult.reason));
     }
   } catch (error) {
-    setConnectionState("error", "再接続を待機中");
-    setDataState("error", "取得エラー");
+    setConnectionState("error", "Waiting to reconnect");
+    setDataState("error", "Fetch error");
     if (chart === null) {
-      showChartOverlay(`データを取得できません · ${errorMessage(error)}`, true);
+      showChartOverlay(`Could not load data / ${errorMessage(error)}`, true);
     }
   } finally {
     pollInFlight = false;
@@ -187,8 +187,8 @@ function updateStateMetadata(state: ChartState): void {
   elements.statusBars.textContent = integerFormatter.format(state.bars.length);
   elements.statusUpdated.textContent = formatDateTime(state.updatedAt);
   elements.statusVolume.textContent = state.bars.some((bar) => bar.volume !== undefined)
-    ? "利用可能"
-    : "データなし";
+    ? "Available"
+    : "No data";
   elements.statusRange.textContent = formatBarRange(state.bars);
 
   if (latest) {
@@ -197,7 +197,7 @@ function updateStateMetadata(state: ChartState): void {
     elements.latestPrice.textContent = formatPrice(latest.close);
     elements.latestChange.textContent =
       change === null || changePercent === null
-        ? "—"
+        ? "-"
         : `${formatSigned(change)}  ${formatSigned(changePercent, 2)}%`;
     elements.quote.dataset.direction = direction;
     elements.latestPrice.classList.remove("is-updated");
@@ -615,7 +615,7 @@ function renderAnalysis(analysis: AnalysisResult): void {
   const score = Math.max(-100, Math.min(100, analysis.trend.score));
   elements.analysisAsOf.textContent = formatUnixTime(analysis.asOf);
   elements.trendBlock.dataset.direction = direction;
-  elements.trendLabel.textContent = `${trendLabel(direction)} · ${strengthLabel(analysis.trend.strength)}`;
+  elements.trendLabel.textContent = `${trendLabel(direction)} / ${strengthLabel(analysis.trend.strength)}`;
   elements.trendScore.textContent = formatSigned(score, 0);
   elements.scoreFill.style.left = score < 0 ? `${50 + score / 2}%` : "50%";
   elements.scoreFill.style.width = `${Math.abs(score) / 2}%`;
@@ -623,7 +623,7 @@ function renderAnalysis(analysis: AnalysisResult): void {
 
   elements.signalList.replaceChildren();
   if (analysis.signals.length === 0) {
-    elements.signalList.append(emptyCopy("現在、明確なシグナルはありません。"));
+    elements.signalList.append(emptyCopy("No clear signals are available."));
   } else {
     analysis.signals.slice(0, 5).forEach((signal) => {
       const item = document.createElement("article");
@@ -646,7 +646,7 @@ function renderAnalysis(analysis: AnalysisResult): void {
   const evidence = analysis.trend.evidence.slice(0, 5);
   if (evidence.length === 0) {
     const item = document.createElement("li");
-    item.textContent = "追加の根拠はありません。";
+    item.textContent = "No additional evidence is available.";
     elements.evidenceList.append(item);
   } else {
     evidence.forEach((copy) => {
@@ -663,13 +663,13 @@ function renderAnalysis(analysis: AnalysisResult): void {
 }
 
 function renderAnalysisError(message: string): void {
-  elements.analysisSummary.textContent = `分析情報を取得できませんでした。${message ? ` ${message}` : ""}`;
-  elements.analysisAsOf.textContent = "—";
+  elements.analysisSummary.textContent = `Analysis is unavailable.${message ? ` ${message}` : ""}`;
+  elements.analysisAsOf.textContent = "-";
 }
 
 function levelChip(label: string, price: number | undefined): HTMLSpanElement {
   const element = document.createElement("span");
-  element.textContent = `${label} ${price === undefined ? "—" : formatPrice(price)}`;
+  element.textContent = `${label} ${price === undefined ? "-" : formatPrice(price)}`;
   return element;
 }
 
@@ -834,21 +834,21 @@ function directionFrom(value: number): "bullish" | "bearish" | "neutral" {
 }
 
 function trendLabel(direction: AnalysisResult["trend"]["direction"]): string {
-  if (direction === "bullish") return "上昇";
-  if (direction === "bearish") return "下降";
-  return "横ばい";
+  if (direction === "bullish") return "Bullish";
+  if (direction === "bearish") return "Bearish";
+  return "Sideways";
 }
 
 function strengthLabel(strength: AnalysisResult["trend"]["strength"]): string {
-  if (strength === "strong") return "強い";
-  if (strength === "moderate") return "中程度";
-  return "弱い";
+  if (strength === "strong") return "Strong";
+  if (strength === "moderate") return "Moderate";
+  return "Weak";
 }
 
 function signalLabel(direction: AnalysisResult["signals"][number]["direction"]): string {
-  if (direction === "bullish") return "強気";
-  if (direction === "bearish") return "弱気";
-  return "中立";
+  if (direction === "bullish") return "Bullish";
+  if (direction === "bearish") return "Bearish";
+  return "Neutral";
 }
 
 function pricePrecision(value: number): number {
@@ -860,7 +860,7 @@ function pricePrecision(value: number): number {
 
 function formatPrice(value: number): string {
   const precision = pricePrecision(value);
-  return new Intl.NumberFormat("ja-JP", {
+  return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: Math.min(2, precision),
     maximumFractionDigits: precision,
   }).format(value);
@@ -868,17 +868,17 @@ function formatPrice(value: number): string {
 
 function formatSigned(value: number, decimals?: number): string {
   const precision = decimals ?? pricePrecision(value);
-  const formatted = new Intl.NumberFormat("ja-JP", {
+  const formatted = new Intl.NumberFormat("en-US", {
     minimumFractionDigits: precision === 0 ? 0 : Math.min(2, precision),
     maximumFractionDigits: precision,
   }).format(Math.abs(value));
-  return `${value > 0 ? "+" : value < 0 ? "−" : ""}${formatted}`;
+  return `${value > 0 ? "+" : value < 0 ? "-" : ""}${formatted}`;
 }
 
 function formatClock(value: string): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat("ja-JP", {
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("en-US", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -888,8 +888,8 @@ function formatClock(value: string): string {
 
 function formatDateTime(value: string): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat("ja-JP", {
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -905,9 +905,9 @@ function formatUnixTime(value: number): string {
 function formatBarRange(bars: readonly Bar[]): string {
   const first = bars[0];
   const last = bars.at(-1);
-  if (!first || !last) return "—";
-  const formatter = new Intl.DateTimeFormat("ja-JP", { year: "2-digit", month: "2-digit", day: "2-digit" });
-  return `${formatter.format(first.time * 1_000)} – ${formatter.format(last.time * 1_000)}`;
+  if (!first || !last) return "-";
+  const formatter = new Intl.DateTimeFormat("en-US", { year: "2-digit", month: "2-digit", day: "2-digit" });
+  return `${formatter.format(first.time * 1_000)} - ${formatter.format(last.time * 1_000)}`;
 }
 
 function errorMessage(error: unknown): string {
@@ -920,4 +920,4 @@ function requireElement<T extends HTMLElement>(id: string): T {
   return element as T;
 }
 
-const integerFormatter = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 0 });
+const integerFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });

@@ -2,7 +2,7 @@
 
 Base URL: `http://127.0.0.1:4317`
 
-成功レスポンスは原則 `{ "success": true, "data": ... }`、エラーは次の形です。
+Successful responses generally use `{ "success": true, "data": ... }`. Errors use:
 
 ```json
 {
@@ -11,21 +11,21 @@ Base URL: `http://127.0.0.1:4317`
 }
 ```
 
-`MARKET_CHART_API_TOKEN`を設定した場合、health以外のAPIへ次のheaderを付けます。
+When `MARKET_CHART_API_TOKEN` is configured, include this header on every API request except health checks:
 
 ```http
 Authorization: Bearer <token>
 ```
 
-viewerは `http://127.0.0.1:4317/#token=<URL-encoded token>` で開けます。tokenは初期読込時にmemoryへ移されてaddress barから消え、同一originのAPIへBearer headerとして付けられます。serverへURLの一部としては送信されません。
+The viewer can be opened at `http://127.0.0.1:4317/#token=<URL-encoded token>`. On initial load, the token moves into memory and is removed from the address bar. It is then attached as a Bearer header to same-origin API requests and is never sent to the server as part of a URL.
 
 ## Market data
 
 ```bash
-# Current + history（default: timeframe=5, range=10）
+# Current value and history (defaults: timeframe=5, range=10)
 curl 'http://127.0.0.1:4317/api/price/DEMO:MARKET?timeframe=60&range=100'
 
-# OHLCV専用route
+# OHLCV-only route
 curl 'http://127.0.0.1:4317/api/price/ohlcv/DEMO:MARKET?timeframe=60&range=100&strictTo=false'
 
 # Quote
@@ -90,7 +90,7 @@ curl -X POST http://127.0.0.1:4317/api/tradingview/chart/snapshot \
   --output tradingview-chart.png
 ```
 
-`open` accepts the same validated TradingView symbol and interval forms as the browser history route; `layoutId` is limited to 4–40 ASCII letters, digits, `_`, or `-`. `snapshot` returns raw `image/png` with `Cache-Control: no-store`. `width` is bounded to `640..2560`, `height` to `480..1800`, and `chartOnly` defaults to `true`. The existing loopback Host check, cross-site request rejection, and configured Bearer authentication apply to all three routes.
+`open` accepts the same validated TradingView symbol and interval forms as the browser history route; `layoutId` is limited to 4-40 ASCII letters, digits, `_`, or `-`. `snapshot` returns raw `image/png` with `Cache-Control: no-store`. `width` is bounded to `640..2560`, `height` to `480..1800`, and `chartOnly` defaults to `true`. The existing loopback Host check, cross-site request rejection, and configured Bearer authentication apply to all three routes.
 
 For the report-grade six-panel batch, use the stricter JSON endpoint:
 
@@ -148,7 +148,7 @@ curl -X POST http://127.0.0.1:4317/api/chart/overlays \
     }],
     "markers":[{
       "id":"signal","time":1783990800,"position":"belowBar","shape":"arrowUp",
-      "color":"#22c55e","text":"押し目買い候補"
+      "color":"#22c55e","text":"Potential pullback entry"
     }]
   }'
 

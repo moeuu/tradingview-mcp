@@ -101,7 +101,7 @@ export async function createApiServer(dependencies: ApiDependencies): Promise<Fa
     success: true,
     data: {
       status: "ok",
-      service: "market-chart-mcp",
+      service: "tradingview-mcp",
       upstreamConfigured: market.upstreamConfigured,
       tradingViewBrowserEnabled: config.tradingViewBrowser.enabled,
       revision: store.getSummary().revision,
@@ -344,7 +344,7 @@ export async function createApiServer(dependencies: ApiDependencies): Promise<Fa
     await app.register(fastifyStatic, { root: staticRoot, wildcard: false });
   } else {
     app.get("/", async () => ({
-      service: "market-chart-mcp",
+      service: "tradingview-mcp",
       message: "Viewer assets are not built. Run npm run build.",
       chartState: "/api/chart/state",
     }));
