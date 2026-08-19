@@ -11,7 +11,7 @@ const INSTRUCTIONS =
 export async function startMcpServer(): Promise<void> {
   const runtime = await createRuntime();
   const server = new McpServer(
-    { name: "market-chart-mcp", version: "0.2.0" },
+    { name: "tradingview-mcp", version: "0.3.0" },
     { instructions: INSTRUCTIONS, capabilities: { logging: {} } },
   );
   registerTools(server, runtime);
@@ -33,7 +33,7 @@ export async function startMcpServer(): Promise<void> {
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
 
-  console.error("market-chart-mcp ready; viewer and TradingView browser start on demand");
+  console.error("tradingview-mcp ready; viewer and TradingView browser start on demand");
   try {
     await server.connect(transport);
     await closed;
@@ -50,7 +50,7 @@ function isEntrypoint(): boolean {
 
 if (isEntrypoint()) {
   startMcpServer().catch((error: unknown) => {
-    console.error("Failed to start market-chart-mcp:", error);
+    console.error("Failed to start tradingview-mcp:", error);
     process.exitCode = 1;
   });
 }

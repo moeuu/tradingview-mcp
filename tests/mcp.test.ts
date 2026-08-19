@@ -43,15 +43,15 @@ describe("MCP stdio server", () => {
       stderr += chunk.toString();
     });
 
-    const client = new Client({ name: "market-chart-mcp-test", version: "0.1.0" });
+    const client = new Client({ name: "standards-client-test", version: "0.1.0" });
     client.onerror = (error) => protocolErrors.push(error);
 
     try {
       await client.connect(transport);
 
       expect(client.getServerVersion()).toMatchObject({
-        name: "market-chart-mcp",
-        version: "0.2.0",
+        name: "tradingview-mcp",
+        version: "0.3.0",
       });
       expect(client.getInstructions()).toContain("tradingview_analyze_symbol");
       expect(client.getInstructions()).toContain("start on demand");
@@ -83,7 +83,17 @@ describe("MCP stdio server", () => {
       );
       expect(initialCapabilities).toMatchObject({
         viewer: { started: false, startsOnDemand: true },
-        providers: { tradingView: { startsOnDemand: true } },
+        providers: {
+          tradingView: {
+            startsOnDemand: true,
+            authenticationMode: "none",
+            credentialPolicy: {
+              acceptedThroughMcp: false,
+              allowedCookieNames: ["sessionid", "sessionid_sign", "device_t"],
+              allowedLocalStorageKeys: [],
+            },
+          },
+        },
       });
 
       const stateResult = await client.callTool({
@@ -218,7 +228,7 @@ describe("MCP stdio server", () => {
     }
 
     expect(protocolErrors).toEqual([]);
-    expect(stderr).toMatch(/market-chart-mcp ready; viewer and TradingView browser start on demand/);
+    expect(stderr).toMatch(/tradingview-mcp ready; viewer and TradingView browser start on demand/);
   }, 20_000);
 
   it("shuts down its HTTP runtime and exits on SIGINT", async () => {
@@ -235,7 +245,7 @@ describe("MCP stdio server", () => {
     const ready = new Promise<void>((resolve) => {
       child.stderr.on("data", (chunk: Buffer | string) => {
         stderr += chunk.toString();
-        if (/market-chart-mcp ready; viewer and TradingView browser start on demand/.test(stderr)) {
+        if (/tradingview-mcp ready; viewer and TradingView browser start on demand/.test(stderr)) {
           resolve();
         }
       });

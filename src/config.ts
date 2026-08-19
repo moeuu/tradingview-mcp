@@ -1,4 +1,8 @@
 import path from "node:path";
+import {
+  DEFAULT_TRADINGVIEW_AUTH_COOKIE_NAMES,
+  parseAuthenticationAllowlist,
+} from "./auth-policy.js";
 
 export interface AppConfig {
   host: "127.0.0.1" | "::1";
@@ -10,9 +14,11 @@ export interface AppConfig {
   screenshotsEnabled: boolean;
   tradingViewBrowser: {
     enabled: boolean;
-    baseUrl: "https://jp.tradingview.com" | "https://www.tradingview.com";
+    baseUrl: "https://www.tradingview.com";
     authStatePath?: string;
     cookieFile?: string;
+    authCookieNames: string[];
+    authStorageKeys: string[];
     headless: boolean;
     timeoutMs: number;
     downloadsDir: string;
@@ -52,6 +58,26 @@ export function loadConfig(
   );
   const authStatePath = resolveOptionalPath(env.TRADINGVIEW_BROWSER_AUTH_STATE, cwd);
   const cookieFile = resolveOptionalPath(env.TRADINGVIEW_BROWSER_COOKIE_FILE, cwd);
+  if (authStatePath && cookieFile) {
+    throw new Error(
+      "Configure only one TradingView authentication source: TRADINGVIEW_BROWSER_AUTH_STATE or TRADINGVIEW_BROWSER_COOKIE_FILE.",
+    );
+  }
+  const authCookieNames = parseAuthenticationAllowlist(
+    env.TRADINGVIEW_BROWSER_AUTH_COOKIE_NAMES,
+    DEFAULT_TRADINGVIEW_AUTH_COOKIE_NAMES,
+    "TRADINGVIEW_BROWSER_AUTH_COOKIE_NAMES",
+  );
+  const authStorageKeys = parseAuthenticationAllowlist(
+    env.TRADINGVIEW_BROWSER_AUTH_STORAGE_KEYS,
+    [],
+    "TRADINGVIEW_BROWSER_AUTH_STORAGE_KEYS",
+  );
+  if ((authStatePath || cookieFile) && authCookieNames.length === 0) {
+    throw new Error(
+      "TRADINGVIEW_BROWSER_AUTH_COOKIE_NAMES must allow at least one cookie when authentication is configured.",
+    );
+  }
   const timeoutMs = parseBoundedInteger(
     env.TRADINGVIEW_BROWSER_TIMEOUT_MS ?? "30000",
     "TRADINGVIEW_BROWSER_TIMEOUT_MS",
@@ -72,6 +98,8 @@ export function loadConfig(
       baseUrl: browserBaseUrl,
       ...(authStatePath ? { authStatePath } : {}),
       ...(cookieFile ? { cookieFile } : {}),
+      authCookieNames,
+      authStorageKeys,
       headless: parseBoolean(env.TRADINGVIEW_BROWSER_HEADLESS, true),
       timeoutMs,
       downloadsDir: path.join(dataRoot, "tradingview-exports"),
@@ -113,13 +141,11 @@ function resolveOptionalPath(value: string | undefined, cwd: string): string | u
 
 function parseTradingViewBaseUrl(
   value: string,
-): "https://jp.tradingview.com" | "https://www.tradingview.com" {
+): "https://www.tradingview.com" {
   const normalized = value.trim().replace(/\/+$/, "");
-  if (normalized === "https://jp.tradingview.com" || normalized === "https://www.tradingview.com") {
-    return normalized;
-  }
+  if (normalized === "https://www.tradingview.com") return normalized;
   throw new Error(
-    "TRADINGVIEW_BROWSER_BASE_URL must be https://jp.tradingview.com or https://www.tradingview.com.",
+    "TRADINGVIEW_BROWSER_BASE_URL must be https://www.tradingview.com so browser automation uses the supported English UI.",
   );
 }
 

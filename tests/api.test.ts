@@ -42,7 +42,9 @@ describe("Fastify API", () => {
       screenshotsEnabled: false,
       tradingViewBrowser: {
         enabled: false,
-        baseUrl: "https://jp.tradingview.com",
+        baseUrl: "https://www.tradingview.com",
+        authCookieNames: ["sessionid", "sessionid_sign", "device_t"],
+        authStorageKeys: [],
         headless: true,
         timeoutMs: 30_000,
         downloadsDir: path.join(dataRoot, "tradingview-exports"),
@@ -72,7 +74,7 @@ describe("Fastify API", () => {
       success: true,
       data: {
         status: "ok",
-        service: "market-chart-mcp",
+        service: "tradingview-mcp",
         upstreamConfigured: false,
         tradingViewBrowserEnabled: false,
         revision: 1,
@@ -281,8 +283,8 @@ describe("Fastify API", () => {
 
   it("opens and inspects an official TradingView chart through protected loopback routes", async () => {
     const state = {
-      url: "https://jp.tradingview.com/chart/layout_123/?symbol=OSE%3ANK2251%21&interval=240",
-      title: "Nikkei 225 Futures — TradingView",
+      url: "https://www.tradingview.com/chart/layout_123/?symbol=OSE%3ANK2251%21&interval=240",
+      title: "Nikkei 225 Futures - TradingView",
       symbol: "OSE:NK2251!",
       interval: "240",
       authenticated: true,

@@ -1,6 +1,6 @@
 {
   "name": "@moeuu/tradingview-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local-first MCP server and loopback chart API for market data analysis and TradingView workflows.",
   "license": "MIT",
   "author": {
@@ -21,7 +21,7 @@
     "tradingview",
     "market-data",
     "technical-analysis",
-    "codex",
+    "stdio",
     "playwright"
   ],
   "type": "module",

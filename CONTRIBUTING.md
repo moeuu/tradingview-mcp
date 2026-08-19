@@ -30,6 +30,10 @@ Before opening a pull request:
    market data, or machine-specific paths are included.
 4. Explain the user-visible behavior and verification performed.
 
+Repository text must use English and ASCII characters only. This includes
+source strings, tests, documentation, examples, issue templates, and
+configuration files. `npm run check:public` enforces this rule.
+
 By contributing, you agree that your contribution is licensed under the MIT
 License included in this repository.
 

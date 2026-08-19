@@ -85,6 +85,16 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
               runtime.config.tradingViewBrowser.authStatePath ??
                 runtime.config.tradingViewBrowser.cookieFile,
             ),
+            authenticationMode: runtime.config.tradingViewBrowser.authStatePath
+              ? "storage-state-file"
+              : runtime.config.tradingViewBrowser.cookieFile
+                ? "cookie-file"
+                : "none",
+            credentialPolicy: {
+              acceptedThroughMcp: false,
+              allowedCookieNames: runtime.config.tradingViewBrowser.authCookieNames,
+              allowedLocalStorageKeys: runtime.config.tradingViewBrowser.authStorageKeys,
+            },
             startsOnDemand: true,
             browserActive: runtime.tradingViewBrowser.active,
           },

@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 import {
+  chmod,
   mkdtemp,
   readFile,
   readdir,
@@ -42,6 +43,7 @@ describe("TradingView authentication input", () => {
       JSON.stringify({
         cookies: [
           cookie("sessionid", "tv", ".tradingview.com"),
+          cookie("theme", "dark", ".tradingview.com"),
           cookie("SID", "other", ".google.com"),
         ],
         origins: [
@@ -57,12 +59,23 @@ describe("TradingView authentication input", () => {
       }),
       "utf8",
     );
+    await chmod(file, 0o600);
 
     const state = await loadTradingViewStorageState(file);
 
     expect(state.cookies.map((item) => item.name)).toEqual(["sessionid"]);
-    expect(state.origins.map((item) => item.origin)).toEqual([
-      "https://www.tradingview.com",
+    expect(state.origins).toEqual([]);
+
+    const optedIn = await loadTradingViewStorageState(
+      file,
+      ["sessionid"],
+      ["chart"],
+    );
+    expect(optedIn.origins).toEqual([
+      {
+        origin: "https://www.tradingview.com",
+        localStorage: [{ name: "chart", value: "saved" }],
+      },
     ]);
   });
 
@@ -73,16 +86,31 @@ describe("TradingView authentication input", () => {
       file,
       JSON.stringify({
         cookies: [
-          cookie("sessionid", "tv", "jp.tradingview.com"),
+          cookie("sessionid", "tv", "www.tradingview.com"),
           cookie("foreign_session", "other", ".note.com"),
         ],
       }),
       "utf8",
     );
+    await chmod(file, 0o600);
 
     const cookies = await loadTradingViewCookies(file);
 
     expect(cookies.map((item) => item.name)).toEqual(["sessionid"]);
+  });
+
+  it("rejects authentication files readable by other users", async () => {
+    if (process.platform === "win32") return;
+    const directory = await mkdtemp(path.join(os.tmpdir(), "tv-auth-permissions-"));
+    const file = path.join(directory, "cookies.json");
+    await writeFile(
+      file,
+      JSON.stringify({ cookies: [cookie("sessionid", "tv", ".tradingview.com")] }),
+      { encoding: "utf8", mode: 0o644 },
+    );
+    await chmod(file, 0o644);
+
+    await expect(loadTradingViewCookies(file)).rejects.toThrow(/owner-only permissions/i);
   });
 
   it("clones auth state in memory and creates disposable service-worker-blocked contexts", async () => {
@@ -90,7 +118,7 @@ describe("TradingView authentication input", () => {
       cookies: [cookie("sessionid", "test-session", ".tradingview.com")],
       origins: [
         {
-          origin: "https://jp.tradingview.com",
+          origin: "https://www.tradingview.com",
           localStorage: [{ name: "auth-marker", value: "present" }],
         },
       ],
@@ -180,7 +208,7 @@ describe("production Playwright capture guard", () => {
         <main class="layout__area--center">
           <div role="region" aria-label="Chart for OSE:NK2251!" style="width:400px;height:300px"></div>
           <canvas aria-label="OSE_DLY:NK2251! 5 minute chart" width="400" height="300"></canvas>
-          <a href="https://jp.tradingview.com/symbols/OSE-NK2251!/">Nikkei 225 Futures</a>
+          <a href="https://www.tradingview.com/symbols/OSE-NK2251!/">Nikkei 225 Futures</a>
         </main>
       `);
       const observed = await new PlaywrightTradingViewCaptureDriver(page).observe("5", undefined);
@@ -204,7 +232,7 @@ describe("production Playwright capture guard", () => {
         <main class="layout__area--center">
           <div role="region" aria-label="Chart for OSE:NK2251!" style="width:400px;height:300px"></div>
           <canvas aria-label="OSE_DLY:NK2251! 5 minute chart" width="400" height="300"></canvas>
-          <a href="https://jp.tradingview.com/symbols/OSE-NK2251!/">Nikkei 225 Futures</a>
+          <a href="https://www.tradingview.com/symbols/OSE-NK2251!/">Nikkei 225 Futures</a>
           <section data-name="legend">
             <div data-name="legend-source-item" data-symbol="OSE:NK2251!">OSE:NK2251!</div>
             <div data-name="legend-source-item" data-symbol="CME:ES1!">CME:ES1!</div>
@@ -212,8 +240,8 @@ describe("production Playwright capture guard", () => {
           </section>
           <section data-name="tree">Object Tree
             <div class="listContainer-fixture"><div>
-              <div data-symbol="OSE:NK2251!">NK2251! · OSE</div>
-              <div data-symbol="CME:ES1!">ES1! · CME</div>
+              <div data-symbol="OSE:NK2251!">NK2251! / OSE</div>
+              <div data-symbol="CME:ES1!">ES1! / CME</div>
               <div data-study-id="STD;Ichimoku Cloud" data-study-name="Ichimoku Cloud">Ichimoku Cloud</div>
               <div data-drawing-id="line-1" data-name="drawing">Trend Line</div>
             </div></div>
@@ -257,7 +285,7 @@ describe("production Playwright capture guard", () => {
       await page.locator('[data-name="object-tree-content"]').evaluate((element) => {
         element.setAttribute("data-name", "tree");
         element.innerHTML =
-          '<div class="listContainer-fixture"><div><div data-symbol="OSE:NK2251!">NK2251! · OSE</div></div></div>';
+          '<div class="listContainer-fixture"><div><div data-symbol="OSE:NK2251!">NK2251! / OSE</div></div></div>';
       });
       const omittedStudy = await new PlaywrightTradingViewCaptureDriver(page).observe("5", undefined);
       expect(omittedStudy.objectTreeAuditComplete).toBe(true);
@@ -295,20 +323,20 @@ describe("production Playwright capture guard", () => {
       await page.setContent(`
         <div data-qa-id="chart-page-grid-area">
           <main class="layout__area--center">
-            <div role="region" aria-label="チャート #1" style="width:400px;height:300px"></div>
-            <canvas aria-label="OSE_DLY:NK2251! の 5 分 チャート" width="400" height="300"></canvas>
-            <a href="https://jp.tradingview.com/symbols/OSE-NK2251!/">Nikkei 225 Futures</a>
+            <div role="region" aria-label="Chart #1" style="width:400px;height:300px"></div>
+            <canvas aria-label="OSE_DLY:NK2251! 5 minute chart" width="400" height="300"></canvas>
+            <a href="https://www.tradingview.com/symbols/OSE-NK2251!/">Nikkei 225 Futures</a>
             <div data-qa-id="legend-series-item">
-              <button data-qa-id="legend-source-item-status" title="市場オープン · 遅延データ"></button>
+              <button data-qa-id="legend-source-item-status" title="Market open / Delayed data"></button>
             </div>
           </main>
-          <aside data-tooltip="OANDA · リアルタイム">watchlist quote</aside>
+          <aside data-tooltip="OANDA / Real-time">watchlist quote</aside>
         </div>
       `);
       const observed = await new PlaywrightTradingViewCaptureDriver(page).observe("5", undefined);
       expect(observed).toMatchObject({
         delayedLabelVisible: true,
-        realtimeLabel: expect.stringMatching(/遅延データ/),
+        realtimeLabel: expect.stringMatching(/Delayed data/),
         realtimeActive: false,
         realtimeSelector: "main-series market-data status control",
       });
@@ -328,7 +356,7 @@ describe("production Playwright capture guard", () => {
         <button data-name="session-menu" aria-label="Session">Full</button>
         <main class="layout__area--center">
           <div role="region" aria-label="Chart for OSE:NK2251!" style="width:1200px;height:600px"></div>
-          <a href="https://jp.tradingview.com/symbols/OSE-NK2251!/">Nikkei 225 Futures</a>
+          <a href="https://www.tradingview.com/symbols/OSE-NK2251!/">Nikkei 225 Futures</a>
           <button data-name="header-intervals-button">5 minutes</button>
           <button data-name="header-chart-type">Candlesticks</button>
           <section data-name="legend">
@@ -341,7 +369,7 @@ describe("production Playwright capture guard", () => {
         </main>
         <section data-name="tree" style="display:none">Object Tree
           <div class="listContainer-fixture"><div>
-            <div data-symbol="OSE:NK2251!">NK2251! · OSE</div>
+            <div data-symbol="OSE:NK2251!">NK2251! / OSE</div>
           </div></div>
         </section>
         <div role="dialog" style="display:none">Settings
@@ -349,10 +377,10 @@ describe("production Playwright capture guard", () => {
           <label>Back adjustment <input type="checkbox"></label>
           <label>Use settlement as close <input type="checkbox"></label>
         </div>
-        <div data-codex-timezone-menu style="display:none">
+        <div data-tradingview-mcp-timezone-menu style="display:none">
           <span aria-checked="true">(UTC+9) Tokyo</span>
         </div>
-        <div data-codex-session-menu style="display:none">
+        <div data-tradingview-mcp-session-menu style="display:none">
           <div data-selected="true">OSE full day and night session</div>
           <span>Day session trading hours</span>
           <span>Night session trading hours</span>
@@ -360,8 +388,8 @@ describe("production Playwright capture guard", () => {
         <script>
           const tree = document.querySelector('[data-name="tree"]');
           const settings = document.querySelector('[role="dialog"]');
-          const timezone = document.querySelector('[data-codex-timezone-menu]');
-          const session = document.querySelector('[data-codex-session-menu]');
+          const timezone = document.querySelector('[data-tradingview-mcp-timezone-menu]');
+          const session = document.querySelector('[data-tradingview-mcp-session-menu]');
           document.querySelector('[data-name="object-tree-button"]').onclick = () => {
             tree.style.display = tree.style.display === 'none' ? 'block' : 'none';
           };
@@ -397,10 +425,10 @@ describe("production Playwright capture guard", () => {
         settlementAsClose: { active: false },
         renderAuditComplete: true,
       });
-      expect(await page.locator('[data-codex-timezone-menu]').getAttribute('data-opened')).toBe(
+      expect(await page.locator('[data-tradingview-mcp-timezone-menu]').getAttribute('data-opened')).toBe(
         'true',
       );
-      expect(await page.locator('[data-codex-session-menu]').getAttribute('data-opened')).toBe(
+      expect(await page.locator('[data-tradingview-mcp-session-menu]').getAttribute('data-opened')).toBe(
         'true',
       );
     } finally {
@@ -549,7 +577,9 @@ describe("official TradingView atomic capture batch", () => {
     dataRoot = await mkdtemp(path.join(os.tmpdir(), "tv-capture-batch-"));
     config = {
       enabled: true,
-      baseUrl: "https://jp.tradingview.com",
+      baseUrl: "https://www.tradingview.com",
+      authCookieNames: ["sessionid", "sessionid_sign", "device_t"],
+      authStorageKeys: [],
       headless: true,
       timeoutMs: 5_000,
       downloadsDir: path.join(dataRoot, "tradingview-exports"),
@@ -568,7 +598,7 @@ describe("official TradingView atomic capture batch", () => {
       ),
     ).toHaveLength(2);
     expect(computeTradingViewCaptureManifestIdentity(vector)).toBe(
-      "sha256:89503954496035d75c78004e45382757b2bec36183b49f009edef5e7cf86d98e",
+      "sha256:05ee64a4fe715370ca15ec4b3a4fe9f245431f0d3a5687505c1c6e5e6e2101e6",
     );
   });
 
@@ -882,7 +912,7 @@ describe("official TradingView atomic capture batch", () => {
     const cases: Array<[Partial<TradingViewCaptureDomObservation>, RegExp]> = [
       [{ realtimeActive: null }, /explicit active real-time/i],
       [{ sessionLabel: "Regular Trading Hours" }, /full day-and-night session/i],
-      [{ sessionLabel: "通常取引時間" }, /full day-and-night session/i],
+      [{ sessionLabel: "Regular trading hours" }, /full day-and-night session/i],
       [{ comparisonAuditComplete: false }, /comparison-series inventory is incomplete/i],
       [{ drawingAuditComplete: false }, /drawing inventory is incomplete/i],
       [
@@ -929,9 +959,9 @@ describe("official TradingView atomic capture batch", () => {
   it("requires the exact final HTTPS TradingView origin/layout/symbol/interval URL", async () => {
     for (const pageUrl of [
       "https://evil.example/chart/example_layout/?symbol=OSE%3ANK2251%21&interval=5",
-      "https://jp.tradingview.com/chart/evil/?symbol=OSE%3ANK2251%21&interval=5",
-      "https://jp.tradingview.com/chart/example_layout/?symbol=OSE%3ANK2251%21EVIL&interval=5",
-      "https://jp.tradingview.com/chart/example_layout/?symbol=OSE%3ANK2251%21&interval=5&extra=1",
+      "https://www.tradingview.com/chart/evil/?symbol=OSE%3ANK2251%21&interval=5",
+      "https://www.tradingview.com/chart/example_layout/?symbol=OSE%3ANK2251%21EVIL&interval=5",
+      "https://www.tradingview.com/chart/example_layout/?symbol=OSE%3ANK2251%21&interval=5&extra=1",
     ]) {
       const driver = new FakeCaptureDriver({
         observation: (interval) => ({
@@ -1288,7 +1318,7 @@ function frozenIdentityVector() {
 
 function frozenIdentityObservedState(interval: CaptureInterval) {
   return {
-    pageUrl: `https://jp.tradingview.com/chart/example_layout/?symbol=OSE%3ANK2251%21&interval=${interval}`,
+    pageUrl: `https://www.tradingview.com/chart/example_layout/?symbol=OSE%3ANK2251%21&interval=${interval}`,
     symbol: "OSE:NK2251!",
     exchange: "OSE",
     interval,
@@ -1314,7 +1344,7 @@ function frozenIdentityObservedState(interval: CaptureInterval) {
         selector: `selector-${index}`,
         value: `value-${index}`,
       })),
-      { selector: "duplicate-selector", value: "éclair" },
+      { selector: "duplicate-selector", value: "eclair" },
       { selector: "duplicate-selector", value: "Zebra" },
     ],
   };
@@ -1475,7 +1505,7 @@ function domObservation(
     chartAuditComplete: true,
     chartAriaLabel: "OSE_DLY:NK2251! candlestick chart",
     chartSelector: 'visible [role="region"][aria-label]',
-    symbolLinkHref: "https://jp.tradingview.com/symbols/OSE-NK2251!/",
+    symbolLinkHref: "https://www.tradingview.com/symbols/OSE-NK2251!/",
     symbolLinkSelector: 'visible exact /symbols/OSE-NK2251!/ chart link',
     intervalLabel: intervalLabels[interval],
     intervalSelector: 'visible [data-name="header-intervals-button"]',
@@ -1536,7 +1566,7 @@ function domObservation(
 }
 
 function testCaptureUrl(interval: CaptureInterval): string {
-  const url = new URL("https://jp.tradingview.com/chart/example_layout/");
+  const url = new URL("https://www.tradingview.com/chart/example_layout/");
   url.searchParams.set("symbol", "OSE:NK2251!");
   url.searchParams.set("interval", interval);
   return url.toString();
