@@ -43,6 +43,7 @@ describe("TradingView day context", () => {
       date: "2024-01-03",
       timezone: "America/New_York",
       includeBars: true,
+      lookbackBars: 500,
     });
 
     expect(result).toMatchObject({
@@ -67,6 +68,8 @@ describe("TradingView day context", () => {
         provider: "TradingView",
         method: "TradingView Supercharts chart-data export",
         authenticated: true,
+        requestedBars: 500,
+        requestedBarsSatisfied: false,
       },
       exportedFields: [
         { time: BARS[1]!.time, fields: { rsi: 50 } },
@@ -83,6 +86,7 @@ describe("TradingView day context", () => {
       date: "2024-01-06",
       timezone: "UTC",
       includeBars: false,
+      lookbackBars: 500,
     });
 
     expect(result).toMatchObject({

@@ -6,6 +6,7 @@ export interface TradingViewDayContextInput {
   date: string;
   timezone: string;
   includeBars: boolean;
+  lookbackBars: number;
 }
 
 export function buildTradingViewDayContext(
@@ -40,6 +41,8 @@ export function buildTradingViewDayContext(
     archiveBytes: history.bytes,
     exportedBarCount: history.sourceBarCount,
     retainedBarCount: history.barCount,
+    requestedBars: input.lookbackBars,
+    requestedBarsSatisfied: barsThroughDate.length >= input.lookbackBars,
     truncated: history.truncated,
   };
 
@@ -63,7 +66,7 @@ export function buildTradingViewDayContext(
   }
 
   const session = aggregateBars(matchingBars, priorBar);
-  const analysisBars = barsThroughDate.slice(-10_000);
+  const analysisBars = barsThroughDate.slice(-input.lookbackBars);
   const technicalAnalysis = analyzeBars(analysisBars);
 
   return {

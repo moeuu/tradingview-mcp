@@ -128,6 +128,15 @@ export const TradingViewIntervalSchema = z
   .max(10)
   .regex(/^(?:[1-9]\d{0,3}[STHDWM]?|[DWM])$/i);
 
+export const TradingViewDayIntervalSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(10)
+  .regex(/^(?:D|1D|[1-9]\d{0,3}|[1-9]\d{0,2}H)$/i, {
+    message: "Day lookup interval must be daily, minutes, or hours.",
+  });
+
 export const TradingViewLayoutIdSchema = z
   .string()
   .trim()
@@ -208,7 +217,7 @@ export const TradingViewDayInputSchema = z
       "TradingView symbol, preferably EXCHANGE:TICKER such as NASDAQ:AAPL.",
     ),
     date: DateOnlySchema.describe("Requested market date in YYYY-MM-DD format."),
-    interval: TradingViewIntervalSchema.default("D").describe(
+    interval: TradingViewDayIntervalSchema.default("D").describe(
       "D returns the session candle; an intraday interval returns and aggregates every exported bar on that date.",
     ),
     timezone: IanaTimezoneSchema.default("UTC").describe(
@@ -592,7 +601,7 @@ export const TradingViewHistoryInputSchema = z.object({
     .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.csv$/i)
     .optional()
     .describe("Optional archive filename without directories."),
-});
+}).strict();
 
 export const PriceInputSchema = z.object({
   symbol: SymbolSchema,

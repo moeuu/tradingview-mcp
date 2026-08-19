@@ -12,7 +12,7 @@ export function parseAuthenticationAllowlist(
   fallback: readonly string[],
   variableName: string,
 ): string[] {
-  if (value === undefined) return uniqueLowercase(fallback);
+  if (value === undefined) return uniqueNames(fallback);
   const trimmed = value.trim();
   if (trimmed === "") return [];
   const names = trimmed.split(",").map((item) => item.trim());
@@ -24,9 +24,9 @@ export function parseAuthenticationAllowlist(
       `${variableName} must contain at most ${MAX_AUTH_NAMES} comma-separated ASCII names.`,
     );
   }
-  return uniqueLowercase(names);
+  return uniqueNames(names);
 }
 
-function uniqueLowercase(names: readonly string[]): string[] {
-  return [...new Set(names.map((name) => name.toLowerCase()))];
+function uniqueNames(names: readonly string[]): string[] {
+  return [...new Set(names)];
 }

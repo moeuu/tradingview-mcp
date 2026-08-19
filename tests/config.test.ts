@@ -101,6 +101,7 @@ describe("configuration", () => {
     expect(config.tradingViewBrowser.authCookieNames).toEqual([
       "sessionid",
       "sessionid_sign",
+      "SESSIONID",
     ]);
     expect(config.tradingViewBrowser.authStorageKeys).toEqual(["auth_marker", "device_id"]);
   });

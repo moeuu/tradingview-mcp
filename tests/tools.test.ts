@@ -60,6 +60,13 @@ describe("MCP TradingView workflows", () => {
         to: "2024-01-01",
       }),
     ).toThrow(/end date/i);
+    expect(() =>
+      TradingViewDayInputSchema.parse({
+        symbol: "NASDAQ:AAPL",
+        date: "2024-02-01",
+        interval: "W",
+      }),
+    ).toThrow(/daily, minutes, or hours/i);
   });
 
   it("returns compact history and closes the browser by default", async () => {

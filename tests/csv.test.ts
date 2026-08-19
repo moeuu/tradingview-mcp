@@ -108,6 +108,21 @@ describe("loadBarsFromCsv", () => {
     ]);
   });
 
+  it("makes normalized headers globally unique when a generated suffix already exists", async () => {
+    const root = await temporaryDirectory();
+    const csvPath = path.join(root, "colliding-fields.csv");
+    await writeFile(
+      csvPath,
+      "time,open,high,low,close,MA,MA_2,MA\n" +
+        "1700000000,10,12,9,11,10.5,10.6,10.7\n",
+      "utf8",
+    );
+
+    const loaded = await loadBarsWithFieldsFromCsv("colliding-fields.csv", root);
+
+    expect(loaded.rows[0]!.fields).toEqual({ ma: 10.5, ma_2: 10.6, ma_3: 10.7 });
+  });
+
   it("blocks parent-directory traversal, absolute paths outside the root, and escaping symlinks", async () => {
     const parent = await temporaryDirectory();
     const root = path.join(parent, "data");

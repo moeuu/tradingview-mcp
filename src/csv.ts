@@ -132,12 +132,24 @@ function parseBarsCsvDetailed(
 }
 
 function uniqueNormalizedHeaders(headers: string[]): string[] {
-  const counts = new Map<string, number>();
+  const nextSuffix = new Map<string, number>();
+  const assigned = new Set<string>();
   return headers.map((header, index) => {
     const base = header.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || `field_${index + 1}`;
-    const count = (counts.get(base) ?? 0) + 1;
-    counts.set(base, count);
-    return count === 1 ? base : `${base}_${count}`;
+    if (!assigned.has(base)) {
+      assigned.add(base);
+      nextSuffix.set(base, 2);
+      return base;
+    }
+    let suffix = nextSuffix.get(base) ?? 2;
+    let candidate = `${base}_${suffix}`;
+    while (assigned.has(candidate)) {
+      suffix += 1;
+      candidate = `${base}_${suffix}`;
+    }
+    assigned.add(candidate);
+    nextSuffix.set(base, suffix + 1);
+    return candidate;
   });
 }
 
