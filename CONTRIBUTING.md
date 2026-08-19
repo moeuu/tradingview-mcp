@@ -42,6 +42,10 @@ post comments or require a personal access token. It runs only trusted code
 from the default branch and never checks out or executes pull request code with
 its status-scoped token.
 
+The gate runs when a pull request is opened, marked ready for review, or receives
+a new commit. After retargeting an existing pull request to `main`, push a new
+commit so Codex reviews the new base diff and publishes a current status.
+
 Repository text must use English and ASCII characters only. This includes
 source strings, tests, documentation, examples, issue templates, and
 configuration files. `npm run check:public` enforces this rule.

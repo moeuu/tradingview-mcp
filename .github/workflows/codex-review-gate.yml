@@ -3,7 +3,7 @@ name: Codex review gate
 on:
   pull_request_target:
     branches: [main]
-    types: [edited, opened, reopened, ready_for_review, synchronize]
+    types: [opened, ready_for_review, synchronize]
 
 permissions:
   contents: read
@@ -12,9 +12,7 @@ permissions:
 
 jobs:
   wait-for-codex:
-    if: >-
-      github.event.pull_request.draft == false &&
-      (github.event.action != 'edited' || github.event.changes.base.ref.from != null)
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 35
     concurrency:

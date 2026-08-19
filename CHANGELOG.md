@@ -11,6 +11,8 @@ Versioning.
 
 - Observe repository-managed automatic Codex reviews directly so the gate
   needs no comment write permission, personal access token, or extra secret.
+- Accept only commit-bound review evidence and ignore ambiguous pull request
+  reactions that could belong to an older in-flight review.
 
 ## [0.4.1] - 2026-08-19
 

@@ -7,7 +7,6 @@ const GITHUB_RETRY_BUDGET_MS = 30 * 60 * 1_000;
 export function detectCodexCompletion({
   reviews,
   reviewSummaryComments = [],
-  pullRequestReactions,
   headSha,
   reviewTriggeredAt,
 }) {
@@ -46,22 +45,6 @@ export function detectCodexCompletion({
       complete: true,
       outcome: "no-suggestions",
       completedAt: summary.created_at,
-    };
-  }
-
-  const reaction = pullRequestReactions.find(
-    (item) =>
-      item?.user?.login === CODEX_BOT_LOGIN &&
-      item.content === "+1" &&
-      typeof item.created_at === "string" &&
-      Number.isFinite(reviewTriggeredMs) &&
-      Date.parse(item.created_at) >= reviewTriggeredMs,
-  );
-  if (reaction) {
-    return {
-      complete: true,
-      outcome: "no-suggestions",
-      completedAt: reaction.created_at,
     };
   }
 
@@ -140,17 +123,15 @@ async function setStatus(repository, headSha, state, description) {
 }
 
 async function readCompletion(repository, pullNumber, headSha, reviewTriggeredAt) {
-  const [reviews, reviewSummaryComments, pullRequestReactions] = await Promise.all([
+  const [reviews, reviewSummaryComments] = await Promise.all([
     githubPages(`/repos/${repository}/pulls/${pullNumber}/reviews`),
     githubPages(
       `/repos/${repository}/issues/${pullNumber}/comments?since=${encodeURIComponent(reviewTriggeredAt)}`,
     ),
-    githubPages(`/repos/${repository}/issues/${pullNumber}/reactions`),
   ]);
   return detectCodexCompletion({
     reviews,
     reviewSummaryComments,
-    pullRequestReactions,
     headSha,
     reviewTriggeredAt,
   });
