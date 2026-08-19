@@ -6,6 +6,7 @@ export const GITHUB_ACTIONS_BOT_LOGIN = "github-actions[bot]";
 
 export function detectCodexCompletion({
   reviews,
+  reviewSummaryComments = [],
   reviewRequestReactions,
   headSha,
   reviewRequestedAt,
@@ -24,6 +25,27 @@ export function detectCodexCompletion({
       complete: true,
       outcome: "review",
       completedAt: review.submitted_at,
+    };
+  }
+
+  const summary = reviewSummaryComments.find((item) => {
+    if (
+      item?.user?.login !== CODEX_BOT_LOGIN ||
+      typeof item.body !== "string" ||
+      typeof item.created_at !== "string" ||
+      !Number.isFinite(reviewRequestedMs) ||
+      Date.parse(item.created_at) < reviewRequestedMs
+    ) return false;
+    const reviewedCommit = /\*\*Reviewed commit:\*\*\s*`([a-f0-9]{10,40})`/i.exec(
+      item.body,
+    )?.[1];
+    return reviewedCommit !== undefined && headSha.startsWith(reviewedCommit.toLowerCase());
+  });
+  if (summary) {
+    return {
+      complete: true,
+      outcome: "no-suggestions",
+      completedAt: summary.created_at,
     };
   }
 
@@ -122,12 +144,14 @@ async function createReviewRequest(repository, pullNumber, headSha) {
 }
 
 async function readCompletion(repository, pullNumber, headSha, request) {
-  const [reviews, reviewRequestReactions] = await Promise.all([
+  const [reviews, reviewSummaryComments, reviewRequestReactions] = await Promise.all([
     githubPages(`/repos/${repository}/pulls/${pullNumber}/reviews`),
+    githubPages(`/repos/${repository}/issues/${pullNumber}/comments`),
     githubPages(`/repos/${repository}/issues/comments/${request.id}/reactions`),
   ]);
   return detectCodexCompletion({
     reviews,
+    reviewSummaryComments,
     reviewRequestReactions,
     headSha,
     reviewRequestedAt: request.createdAt,

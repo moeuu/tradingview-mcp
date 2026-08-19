@@ -8,6 +8,11 @@ interface CodexReviewGateInput {
     commit_id?: string | undefined;
     submitted_at?: string | undefined;
   }>;
+  reviewSummaryComments?: Array<{
+    user?: { login?: string | undefined } | undefined;
+    body?: string | undefined;
+    created_at?: string | undefined;
+  }> | undefined;
   reviewRequestReactions: Array<{
     user?: { login?: string | undefined } | undefined;
     content?: string | undefined;

@@ -84,6 +84,47 @@ describe("Codex review gate", () => {
     expect(result).toMatchObject({ complete: true, outcome: "no-suggestions" });
   });
 
+  it("accepts a post-request Codex summary naming the current head", () => {
+    const result = detectCodexCompletion({
+      headSha: HEAD_SHA,
+      reviewRequestedAt: REVIEW_REQUESTED_AT,
+      reviews: [],
+      reviewSummaryComments: [
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          body: "No major issues.\n\n**Reviewed commit:** `0123456789`",
+          created_at: "2026-08-19T08:05:00Z",
+        },
+      ],
+      reviewRequestReactions: [],
+    });
+
+    expect(result).toMatchObject({ complete: true, outcome: "no-suggestions" });
+  });
+
+  it("rejects stale or mismatched no-suggestions summaries", () => {
+    const result = detectCodexCompletion({
+      headSha: HEAD_SHA,
+      reviewRequestedAt: REVIEW_REQUESTED_AT,
+      reviews: [],
+      reviewSummaryComments: [
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          body: "**Reviewed commit:** `0123456789`",
+          created_at: "2026-08-19T07:59:59Z",
+        },
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          body: "**Reviewed commit:** `fedcba9876`",
+          created_at: "2026-08-19T08:05:00Z",
+        },
+      ],
+      reviewRequestReactions: [],
+    });
+
+    expect(result).toEqual({ complete: false, outcome: "pending", completedAt: null });
+  });
+
   it("rejects stale reactions and lookalike bot accounts", () => {
     const result = detectCodexCompletion({
       headSha: HEAD_SHA,
