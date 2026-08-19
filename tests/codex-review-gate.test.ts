@@ -37,7 +37,8 @@ describe("Codex review gate", () => {
     expect(trigger).not.toContain("issues: write");
     expect(trigger).not.toContain("statuses: write");
     expect(gate).toContain("workflow_run:");
-    expect(gate).toContain("issues: write");
+    expect(gate).not.toContain("issues: write");
+    expect(gate).toContain("pull-requests: write");
     expect(gate).toContain("statuses: write");
     expect(gate).toContain("github.event.workflow_run.head_sha");
   });
