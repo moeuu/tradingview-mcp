@@ -999,29 +999,55 @@ export class TradingViewBrowserService {
   }
 
   async #chartVisualHash(page: Page): Promise<string> {
-    const png = await page
-      .getByRole("region", { name: /chart/i })
-      .first()
-      .screenshot({ type: "png", animations: "disabled", caret: "hide" });
+    const chart = page.getByRole("region", { name: /chart/i }).first();
+    const box = await chart.boundingBox();
+    if (!box || box.width < 100 || box.height < 100) {
+      throw new Error("TradingView chart bounds were unavailable during range navigation.");
+    }
+    const png = await page.screenshot({
+      type: "png",
+      animations: "disabled",
+      caret: "hide",
+      clip: {
+        x: box.x + box.width * 0.05,
+        y: box.y + box.height * 0.15,
+        width: box.width * 0.65,
+        height: box.height * 0.7,
+      },
+    });
     return sha256(png);
+  }
+
+  async #chartLoadingVisible(page: Page): Promise<boolean> {
+    return page
+      .locator(
+        'main [aria-busy="true"], main [data-name*="loading" i], main [class*="loading" i]',
+      )
+      .evaluateAll((elements) =>
+        elements.some((element) => {
+          const html = element as HTMLElement;
+          const style = window.getComputedStyle(html);
+          return (
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            (html.offsetWidth > 0 || html.offsetHeight > 0 || html.getClientRects().length > 0)
+          );
+        }),
+      );
   }
 
   async #waitForDateRangeRender(page: Page, beforeHash: string): Promise<void> {
     await this.#waitForChart(page);
     const deadline = Date.now() + this.config.timeoutMs;
+    const earliestReady = Date.now() + 750;
     let changed = false;
-    let stableHash: string | undefined;
-    let stableSamples = 0;
+    let readySamples = 0;
     while (Date.now() < deadline) {
       const currentHash = await this.#chartVisualHash(page);
       changed ||= currentHash !== beforeHash;
-      if (changed && currentHash === stableHash) {
-        stableSamples += 1;
-      } else {
-        stableHash = currentHash;
-        stableSamples = 1;
-      }
-      if (changed && stableSamples >= 2) return;
+      const loading = await this.#chartLoadingVisible(page);
+      readySamples = changed && !loading ? readySamples + 1 : 0;
+      if (readySamples >= 2 && Date.now() >= earliestReady) return;
       await page.waitForTimeout(350);
     }
     throw new Error("TradingView did not finish rendering the requested custom date range.");

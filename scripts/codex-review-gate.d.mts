@@ -7,13 +7,13 @@ interface CodexReviewGateInput {
     commit_id?: string | undefined;
     submitted_at?: string | undefined;
   }>;
-  reactions: Array<{
+  reviewRequestReactions: Array<{
     user?: { login?: string | undefined } | undefined;
     content?: string | undefined;
     created_at?: string | undefined;
   }>;
   headSha: string;
-  headCommittedAt: string;
+  reviewRequestedAt: string;
 }
 
 interface CodexReviewGateResult {
@@ -25,3 +25,5 @@ interface CodexReviewGateResult {
 export function detectCodexCompletion(
   input: CodexReviewGateInput,
 ): CodexReviewGateResult;
+
+export function retryableGithubStatus(status: number): boolean;

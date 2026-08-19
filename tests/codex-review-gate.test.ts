@@ -3,16 +3,17 @@ import { describe, expect, it } from "vitest";
 import {
   CODEX_BOT_LOGIN,
   detectCodexCompletion,
+  retryableGithubStatus,
 } from "../scripts/codex-review-gate.mjs";
 
 const HEAD_SHA = "0123456789abcdef0123456789abcdef01234567";
-const HEAD_COMMITTED_AT = "2026-08-19T08:00:00Z";
+const REVIEW_REQUESTED_AT = "2026-08-19T08:00:00Z";
 
 describe("Codex review gate", () => {
   it("accepts a submitted Codex review only for the current head", () => {
     const result = detectCodexCompletion({
       headSha: HEAD_SHA,
-      headCommittedAt: HEAD_COMMITTED_AT,
+      reviewRequestedAt: REVIEW_REQUESTED_AT,
       reviews: [
         {
           user: { login: CODEX_BOT_LOGIN },
@@ -20,7 +21,7 @@ describe("Codex review gate", () => {
           submitted_at: "2026-08-19T08:05:00Z",
         },
       ],
-      reactions: [],
+      reviewRequestReactions: [],
     });
 
     expect(result).toMatchObject({ complete: true, outcome: "review" });
@@ -29,7 +30,7 @@ describe("Codex review gate", () => {
   it("rejects a review for an obsolete head", () => {
     const result = detectCodexCompletion({
       headSha: HEAD_SHA,
-      headCommittedAt: HEAD_COMMITTED_AT,
+      reviewRequestedAt: REVIEW_REQUESTED_AT,
       reviews: [
         {
           user: { login: CODEX_BOT_LOGIN },
@@ -37,18 +38,18 @@ describe("Codex review gate", () => {
           submitted_at: "2026-08-19T08:05:00Z",
         },
       ],
-      reactions: [],
+      reviewRequestReactions: [],
     });
 
     expect(result).toEqual({ complete: false, outcome: "pending", completedAt: null });
   });
 
-  it("accepts a no-suggestions reaction created after the head commit", () => {
+  it("accepts a no-suggestions reaction on the head-specific request", () => {
     const result = detectCodexCompletion({
       headSha: HEAD_SHA,
-      headCommittedAt: HEAD_COMMITTED_AT,
+      reviewRequestedAt: REVIEW_REQUESTED_AT,
       reviews: [],
-      reactions: [
+      reviewRequestReactions: [
         {
           user: { login: CODEX_BOT_LOGIN },
           content: "+1",
@@ -63,9 +64,9 @@ describe("Codex review gate", () => {
   it("rejects stale reactions and lookalike bot accounts", () => {
     const result = detectCodexCompletion({
       headSha: HEAD_SHA,
-      headCommittedAt: HEAD_COMMITTED_AT,
+      reviewRequestedAt: REVIEW_REQUESTED_AT,
       reviews: [],
-      reactions: [
+      reviewRequestReactions: [
         {
           user: { login: CODEX_BOT_LOGIN },
           content: "+1",
@@ -80,5 +81,10 @@ describe("Codex review gate", () => {
     });
 
     expect(result).toEqual({ complete: false, outcome: "pending", completedAt: null });
+  });
+
+  it("retries only transient GitHub response statuses", () => {
+    expect([429, 500, 502, 503, 504].every(retryableGithubStatus)).toBe(true);
+    expect([400, 401, 403, 404, 422].some(retryableGithubStatus)).toBe(false);
   });
 });

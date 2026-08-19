@@ -5,9 +5,9 @@ export const CODEX_STATUS_CONTEXT = "codex-review";
 
 export function detectCodexCompletion({
   reviews,
-  reactions,
+  reviewRequestReactions,
   headSha,
-  headCommittedAt,
+  reviewRequestedAt,
 }) {
   const review = reviews.find(
     (item) =>
@@ -23,14 +23,14 @@ export function detectCodexCompletion({
     };
   }
 
-  const headCommittedMs = Date.parse(headCommittedAt);
-  const reaction = reactions.find(
+  const reviewRequestedMs = Date.parse(reviewRequestedAt);
+  const reaction = reviewRequestReactions.find(
     (item) =>
       item?.user?.login === CODEX_BOT_LOGIN &&
       item.content === "+1" &&
       typeof item.created_at === "string" &&
-      Number.isFinite(headCommittedMs) &&
-      Date.parse(item.created_at) >= headCommittedMs,
+      Number.isFinite(reviewRequestedMs) &&
+      Date.parse(item.created_at) >= reviewRequestedMs,
   );
   if (reaction) {
     return {
@@ -43,23 +43,45 @@ export function detectCodexCompletion({
   return { complete: false, outcome: "pending", completedAt: null };
 }
 
+export function retryableGithubStatus(status) {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
 async function githubJson(apiPath, options = {}) {
-  const response = await fetch(`https://api.github.com${apiPath}`, {
-    method: options.method ?? "GET",
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${requiredEnvironment("GITHUB_TOKEN")}`,
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-    ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-  });
-  if (!response.ok) {
-    throw new Error(
-      `GitHub API ${options.method ?? "GET"} ${apiPath} failed with status ${response.status}.`,
+  const method = options.method ?? "GET";
+  const attempts = method === "GET" ? 4 : 1;
+  let lastStatus;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(`https://api.github.com${apiPath}`, {
+        method,
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${requiredEnvironment("GITHUB_TOKEN")}`,
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+        ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+      });
+    } catch (error) {
+      if (attempt + 1 >= attempts) throw error;
+      await delay(retryDelayMs(attempt));
+      continue;
+    }
+    if (response.ok) {
+      if (response.status === 204) return null;
+      return response.json();
+    }
+    lastStatus = response.status;
+    if (!retryableGithubStatus(response.status) || attempt + 1 >= attempts) break;
+    const retryAfterSeconds = Number(response.headers.get("retry-after"));
+    await delay(
+      Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0
+        ? Math.min(10_000, retryAfterSeconds * 1_000)
+        : retryDelayMs(attempt),
     );
   }
-  if (response.status === 204) return null;
-  return response.json();
+  throw new Error(`GitHub API ${method} ${apiPath} failed with status ${lastStatus ?? "unknown"}.`);
 }
 
 async function githubPages(apiPath) {
@@ -87,49 +109,44 @@ async function setStatus(repository, headSha, state, description) {
   });
 }
 
-async function requestReviewIfNeeded(repository, pullNumber, headSha, action) {
-  if (!new Set(["synchronize", "reopened"]).has(action)) return;
+async function ensureReviewRequest(repository, pullNumber, headSha) {
   const marker = `<!-- codex-review-gate:${headSha} -->`;
   const comments = await githubPages(`/repos/${repository}/issues/${pullNumber}/comments`);
-  if (comments.some((comment) => typeof comment.body === "string" && comment.body.includes(marker))) {
-    return;
+  const existing = comments.find(
+    (comment) => typeof comment.body === "string" && comment.body.includes(marker),
+  );
+  if (existing) {
+    return reviewRequest(existing);
   }
-  await githubJson(`/repos/${repository}/issues/${pullNumber}/comments`, {
+  const created = await githubJson(`/repos/${repository}/issues/${pullNumber}/comments`, {
     method: "POST",
     body: { body: `@codex review\n\n${marker}` },
   });
+  return reviewRequest(created);
 }
 
-async function readCompletion(repository, pullNumber, headSha, headCommittedAt) {
-  const [reviews, reactions] = await Promise.all([
+async function readCompletion(repository, pullNumber, headSha, request) {
+  const [reviews, reviewRequestReactions] = await Promise.all([
     githubPages(`/repos/${repository}/pulls/${pullNumber}/reviews`),
-    githubPages(`/repos/${repository}/issues/${pullNumber}/reactions`),
+    githubPages(`/repos/${repository}/issues/comments/${request.id}/reactions`),
   ]);
-  return detectCodexCompletion({ reviews, reactions, headSha, headCommittedAt });
+  return detectCodexCompletion({
+    reviews,
+    reviewRequestReactions,
+    headSha,
+    reviewRequestedAt: request.createdAt,
+  });
 }
 
 async function main() {
   const repository = requiredEnvironment("GITHUB_REPOSITORY");
   const pullNumber = positiveInteger(requiredEnvironment("PR_NUMBER"), "PR_NUMBER");
   const headSha = exactSha(requiredEnvironment("PR_HEAD_SHA"));
-  const action = requiredEnvironment("PR_ACTION");
-  const commit = await githubJson(`/repos/${repository}/commits/${headSha}`);
-  const headCommittedAt = commit?.commit?.committer?.date;
-  if (typeof headCommittedAt !== "string") {
-    throw new Error("The pull request head commit has no committer date.");
-  }
 
   await setStatus(repository, headSha, "pending", "Waiting for Codex review on this commit");
   try {
-    let completion = await readCompletion(
-      repository,
-      pullNumber,
-      headSha,
-      headCommittedAt,
-    );
-    if (!completion.complete) {
-      await requestReviewIfNeeded(repository, pullNumber, headSha, action);
-    }
+    const request = await ensureReviewRequest(repository, pullNumber, headSha);
+    let completion = await readCompletion(repository, pullNumber, headSha, request);
 
     const timeoutMs = positiveInteger(
       process.env.CODEX_REVIEW_TIMEOUT_MS ?? "1800000",
@@ -141,13 +158,8 @@ async function main() {
     );
     const deadline = Date.now() + timeoutMs;
     while (!completion.complete && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, pollMs));
-      completion = await readCompletion(
-        repository,
-        pullNumber,
-        headSha,
-        headCommittedAt,
-      );
+      await delay(pollMs);
+      completion = await readCompletion(repository, pullNumber, headSha, request);
     }
     if (!completion.complete) {
       throw new Error("Codex did not finish reviewing the current pull request head in time.");
@@ -163,6 +175,26 @@ async function main() {
     );
     throw error;
   }
+}
+
+function reviewRequest(value) {
+  if (
+    !value ||
+    !Number.isSafeInteger(value.id) ||
+    typeof value.created_at !== "string" ||
+    !Number.isFinite(Date.parse(value.created_at))
+  ) {
+    throw new Error("The Codex review request comment response was incomplete.");
+  }
+  return { id: value.id, createdAt: value.created_at };
+}
+
+function retryDelayMs(attempt) {
+  return Math.min(2_000, 250 * 2 ** attempt);
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function requiredEnvironment(name) {

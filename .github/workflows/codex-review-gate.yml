@@ -3,7 +3,7 @@ name: Codex review gate
 on:
   pull_request_target:
     branches: [main]
-    types: [opened, reopened, ready_for_review, synchronize]
+    types: [edited, opened, reopened, ready_for_review, synchronize]
 
 permissions:
   contents: read
@@ -31,7 +31,6 @@ jobs:
       - name: Wait for Codex review of the pull request head
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          PR_ACTION: ${{ github.event.action }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: node scripts/codex-review-gate.mjs

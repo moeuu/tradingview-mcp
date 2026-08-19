@@ -135,7 +135,15 @@ export const TradingViewDayIntervalSchema = z
   .max(10)
   .regex(/^(?:D|1D|[1-9]\d{0,3}|[1-9]\d{0,2}H)$/i, {
     message: "Day lookup interval must be daily, minutes, or hours.",
-  });
+  })
+  .refine((value) => {
+    const normalized = value.toUpperCase();
+    if (normalized === "D" || normalized === "1D") return true;
+    const match = /^(\d+)(H?)$/.exec(normalized);
+    if (!match) return false;
+    const durationMinutes = Number(match[1]) * (match[2] === "H" ? 60 : 1);
+    return durationMinutes <= 1_440;
+  }, "Day lookup interval must not span more than 24 hours.");
 
 export const TradingViewLayoutIdSchema = z
   .string()
