@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ja" data-theme="dark" data-ready="false">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Codex が操作するローカル専用の市場チャートとテクニカル分析ビュー"
+    />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>Market Lens — Codex Chart Workspace</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-ready="false">
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Market Lens ホーム">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img">
+              <path d="M4 17.5 8.2 13l3 2.7 4.6-7.2L20 11" />
+              <path d="M4 20h16" />
+            </svg>
+          </span>
+          <span class="brand-copy">
+            <strong>Market Lens</strong>
+            <small>Codex chart workspace</small>
+          </span>
+        </a>
+
+        <div class="connection" id="connection" data-state="loading" role="status" aria-live="polite">
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span id="connection-label">データを接続中</span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="market-surface" aria-labelledby="instrument-symbol">
+          <header class="instrument-header">
+            <div class="instrument-identity">
+              <div class="instrument-title-line">
+                <h1 id="instrument-symbol">—</h1>
+                <span class="interval-badge" id="instrument-interval">—</span>
+              </div>
+              <p>
+                <span id="instrument-source">データソースを確認中</span>
+                <span class="meta-separator" aria-hidden="true">/</span>
+                <span id="instrument-bars">— bars</span>
+              </p>
+            </div>
+
+            <div class="quote" id="quote" data-direction="neutral">
+              <span class="quote-label">最新価格</span>
+              <strong id="latest-price">—</strong>
+              <span class="quote-change" id="latest-change">—</span>
+            </div>
+
+            <dl class="revision-meta">
+              <div>
+                <dt>REVISION</dt>
+                <dd id="revision-value">—</dd>
+              </div>
+              <div>
+                <dt>UPDATED</dt>
+                <dd id="updated-value">—</dd>
+              </div>
+            </dl>
+          </header>
+
+          <div class="chart-heading">
+            <div>
+              <span class="section-kicker">PRICE / VOLUME</span>
+              <span class="chart-note">ドラッグで移動 · スクロールで拡大</span>
+            </div>
+            <div class="indicator-legend" id="indicator-legend" aria-label="表示中の指標"></div>
+          </div>
+
+          <div class="chart-frame">
+            <div id="chart" class="chart-canvas" aria-label="ローソク足とテクニカル指標のチャート"></div>
+            <div class="chart-overlay" id="chart-overlay" role="status" aria-live="polite">
+              <span class="loader" aria-hidden="true"></span>
+              <span id="chart-overlay-label">チャートデータを読み込んでいます</span>
+            </div>
+          </div>
+        </section>
+
+        <aside class="inspector" aria-label="市場分析とデータ状態">
+          <section class="analysis-panel" aria-labelledby="analysis-title">
+            <header class="panel-header">
+              <div>
+                <span class="section-kicker">CODEX ANALYSIS</span>
+                <h2 id="analysis-title">チャート分析</h2>
+              </div>
+              <span class="analysis-asof" id="analysis-asof">—</span>
+            </header>
+
+            <div class="trend-block" id="trend-block" data-direction="neutral">
+              <div class="trend-topline">
+                <div>
+                  <span class="minor-label">TREND</span>
+                  <strong id="trend-label">分析待ち</strong>
+                </div>
+                <span class="trend-score" id="trend-score">0</span>
+              </div>
+              <div class="score-track" aria-hidden="true">
+                <span id="score-fill"></span>
+                <i></i>
+              </div>
+              <p id="analysis-summary">市場データの分析結果を取得しています。</p>
+            </div>
+
+            <div class="analysis-section">
+              <h3>シグナル</h3>
+              <div class="signal-list" id="signal-list">
+                <p class="empty-copy">分析待ち</p>
+              </div>
+            </div>
+
+            <div class="analysis-section">
+              <h3>根拠</h3>
+              <ul class="evidence-list" id="evidence-list">
+                <li>分析待ち</li>
+              </ul>
+            </div>
+
+            <div class="analysis-section">
+              <h3>主要水準</h3>
+              <div class="level-summary" id="analysis-levels">
+                <span>Support —</span>
+                <span>Resistance —</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="data-panel" aria-labelledby="data-title">
+            <header class="panel-header compact">
+              <div>
+                <span class="section-kicker">DATA STATUS</span>
+                <h2 id="data-title">取得状況</h2>
+              </div>
+              <span class="data-state" id="data-state" data-state="loading">同期中</span>
+            </header>
+            <dl class="data-list">
+              <div>
+                <dt>ソース</dt>
+                <dd id="status-source">—</dd>
+              </div>
+              <div>
+                <dt>期間</dt>
+                <dd id="status-range">—</dd>
+              </div>
+              <div>
+                <dt>バー数</dt>
+                <dd id="status-bars">—</dd>
+              </div>
+              <div>
+                <dt>出来高</dt>
+                <dd id="status-volume">—</dd>
+              </div>
+              <div>
+                <dt>最終同期</dt>
+                <dd id="status-updated">—</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="notice-panel" aria-labelledby="notice-title">
+            <span class="notice-icon" aria-hidden="true">i</span>
+            <div>
+              <h2 id="notice-title">分析について</h2>
+              <p>
+                この画面は情報提供・チャート分析専用です。表示内容は投資助言ではなく、価格の正確性や即時性を保証しません。
+              </p>
+            </div>
+          </section>
+        </aside>
+      </main>
+
+      <footer class="footer">
+        <p>Local chart workspace · Codex technical analysis</p>
+        <p class="attribution-notice">
+          Lightweight Charts™ Copyright © 2025 TradingView, Inc.
+          <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">Charts by TradingView</a>
+        </p>
+      </footer>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,206 @@
+# TradingView MCP
+
+[![CI](https://github.com/moeuu/tradingview-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/moeuu/tradingview-mcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](package.json)
+
+A local-first Model Context Protocol server and loopback REST API for market data, deterministic technical analysis, chart rendering, and optional TradingView Supercharts browser workflows.
+
+The server runs over stdio and starts its local viewer and Playwright browsers only when a tool needs them. High-level history and analysis tools close the managed browser automatically by default.
+
+> [!IMPORTANT]
+> This is an independent open-source project. It is not affiliated with, sponsored by, or endorsed by TradingView. TradingView and Lightweight Charts are trademarks of TradingView, Inc. Users are responsible for complying with TradingView's terms, account permissions, exchange entitlements, and applicable data licenses.
+
+## Features
+
+- MCP tools for market discovery, quotes, OHLCV, analysis, and chart state
+- Deterministic SMA, EMA, RSI, MACD, Bollinger Bands, ATR, trend, signal, and support/resistance calculations
+- Local Lightweight Charts viewer with PNG capture
+- CSV, inline OHLCV, demo data, and optional configured upstream support
+- Atomic indicator, level, custom-series, price-zone, and marker overlays
+- Opt-in Playwright workflows for account-authorized TradingView Supercharts navigation, CSV export, indicators, and screenshots
+- Compact MCP results by default so large OHLCV arrays do not consume model context unnecessarily
+- Loopback-only HTTP binding, path containment, input validation, credential filtering, and fail-closed browser checks
+
+## Architecture
+
+```text
+MCP client ── stdio ──┬─ deterministic analysis and chart state
+                      ├─ on-demand local viewer / PNG capture
+                      └─ optional on-demand TradingView browser
+
+REST client ─ loopback HTTP ── local viewer and compatible JSON endpoints
+```
+
+The local viewer is a deterministic rendering surface; it is not a clone of proprietary TradingView charting features. See [the compatibility boundary](docs/COMPATIBILITY.md).
+
+## Requirements
+
+- Node.js 22 or newer
+- npm
+- Chromium installed through Playwright when screenshot or browser tools are used
+
+## Install from source
+
+```bash
+git clone https://github.com/moeuu/tradingview-mcp.git
+cd tradingview-mcp
+npm ci
+npx playwright install chromium
+npm run build
+```
+
+For Linux CI or a machine without Chromium system dependencies:
+
+```bash
+npx playwright install --with-deps chromium
+```
+
+## Connect an MCP client
+
+Any MCP client that supports local stdio servers can launch:
+
+```text
+node /absolute/path/to/tradingview-mcp/dist/mcp.js
+```
+
+For Codex, the shortest registration command is:
+
+```bash
+PROJECT_ROOT="$(pwd)"
+codex mcp add market-chart -- node "$PROJECT_ROOT/dist/mcp.js"
+codex mcp list
+```
+
+A more explicit Codex configuration is:
+
+```toml
+[mcp_servers.market-chart]
+command = "node"
+args = ["/absolute/path/to/tradingview-mcp/dist/mcp.js"]
+cwd = "/absolute/path/to/tradingview-mcp"
+startup_timeout_sec = 20
+tool_timeout_sec = 180
+default_tools_approval_mode = "writes"
+
+[mcp_servers.market-chart.env]
+MARKET_CHART_PORT = "0"
+MARKET_CHART_DATA_ROOT = "/absolute/path/to/tradingview-mcp/data"
+```
+
+Restart the MCP client after changing its configuration. `MARKET_CHART_PORT=0` selects an ephemeral viewer port and avoids a permanently listening service.
+
+## Recommended MCP workflow
+
+1. Call `market_get_capabilities` when provider availability is unclear.
+2. Use `tradingview_analyze_symbol` for one-call Supercharts export plus deterministic analysis.
+3. Use `tradingview_get_history` when only history is needed.
+4. Use `chart_import_csv` or `chart_set_data` for local/user-provided data.
+5. Use `chart_analyze`, `chart_apply_overlays`, and `chart_snapshot` for local analysis and visualization.
+
+`tradingview_get_history` and `tradingview_analyze_symbol` return a compact history summary and close the browser by default. Set `includeBars: true` only when raw bars are required in the MCP response, and `keepBrowserOpen: true` only for immediate follow-up browser tools.
+
+The server exposes both high-level and granular tools. Clients that support an `enabled_tools` allowlist can expose only the tools needed for a given workflow.
+
+## Optional TradingView browser workflow
+
+Browser automation is disabled by default. Provide either a Playwright storage-state file or a supported cookie export by file path. Never paste credential values into MCP arguments, repository files, or prompts.
+
+```bash
+chmod 600 /absolute/path/to/tradingview-auth-state.json
+export TRADINGVIEW_BROWSER_ENABLED=true
+export TRADINGVIEW_BROWSER_BASE_URL=https://www.tradingview.com
+export TRADINGVIEW_BROWSER_AUTH_STATE=/absolute/path/to/tradingview-auth-state.json
+export TRADINGVIEW_BROWSER_HEADLESS=true
+export TRADINGVIEW_BROWSER_TIMEOUT_MS=120000
+```
+
+The authentication file must remain outside the repository. Imported cookies and storage entries are restricted to TradingView domains, and credential values are not returned by MCP or REST responses.
+
+Supercharts UI availability, selectors, exports, account plans, exchange entitlements, and delayed/live status are controlled by TradingView and can change independently of this project. The automation never attempts an account upgrade or purchase.
+
+See [TradingView browser workflows](docs/TRADINGVIEW_BROWSER.md) for details and limitations.
+
+## Standalone REST API and viewer
+
+The REST API is optional and does not need to run for normal MCP use.
+
+```bash
+npm run serve
+```
+
+It binds to `127.0.0.1:4317` by default:
+
+```bash
+curl http://127.0.0.1:4317/api/health
+curl 'http://127.0.0.1:4317/api/price/DEMO:MARKET?timeframe=60&range=20'
+```
+
+Set a bearer token before enabling a paid/configured upstream or exposing sensitive local chart data to another local process:
+
+```bash
+export MARKET_CHART_API_TOKEN='replace-with-a-long-random-value'
+npm run serve
+```
+
+HTTP binding is restricted to loopback addresses. See the [REST API reference](docs/API.md).
+
+## Configuration
+
+Copy `.env.example` as a reference, but load real values from your shell, process manager, or secret store. The application does not automatically read `.env` files.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MARKET_CHART_HOST` | `127.0.0.1` | Loopback bind address only |
+| `MARKET_CHART_PORT` | `4317` | REST/viewer port; use `0` for an ephemeral MCP viewer |
+| `MARKET_CHART_DATA_ROOT` | `./data` | Contained CSV, export, and capture root |
+| `MARKET_CHART_API_TOKEN` | unset | Optional REST bearer token |
+| `MARKET_CHART_SCREENSHOTS` | `true` | Enable local viewer PNG capture |
+| `TRADINGVIEW_BROWSER_ENABLED` | `false` | Enable Supercharts browser tools |
+| `TRADINGVIEW_BROWSER_BASE_URL` | `https://www.tradingview.com` | Allowed TradingView origin |
+| `TRADINGVIEW_BROWSER_AUTH_STATE` | unset | External Playwright storage-state path |
+| `TRADINGVIEW_BROWSER_COOKIE_FILE` | unset | External cookie-export path |
+| `TRADINGVIEW_BROWSER_HEADLESS` | `true` | Run managed Chromium headlessly |
+| `TRADINGVIEW_BROWSER_TIMEOUT_MS` | `30000` | Browser operation timeout, 5–120 seconds |
+| `TRADINGVIEW_RAPIDAPI_KEY` | unset | Optional compatible upstream key |
+| `TRADINGVIEW_RAPIDAPI_HOST` | provider default | Optional compatible upstream host |
+
+## Local CSV format
+
+CSV imports must resolve inside `MARKET_CHART_DATA_ROOT`, contain ascending timestamps, and stay within configured limits.
+
+```csv
+time,open,high,low,close,volume
+2026-01-02T00:00:00Z,100,104,99,103,1200000
+2026-01-03T00:00:00Z,103,106,101,105,1350000
+```
+
+`timestamp` or `date` can replace `time`; Unix seconds and milliseconds are also accepted.
+
+## Security model
+
+- No network listener is created by an idle stdio MCP process.
+- Local HTTP routes bind only to loopback and validate the `Host` header.
+- Imported files use real-path containment and reject symlink traversal.
+- Browser authentication is read from external files and filtered to TradingView domains.
+- Browser operations serialize stateful UI work and reject credential-like tool inputs.
+- Generated browser artifacts, credentials, `.env` files, traces, and local market data are ignored by Git.
+- Results are analytical observations, not investment advice or a guarantee of future performance.
+
+Please report vulnerabilities according to [SECURITY.md](SECURITY.md).
+
+## Development
+
+```bash
+npm ci
+npx playwright install chromium
+npm run check
+```
+
+`npm run check` runs strict TypeScript checking, the full Vitest suite, and the production build.
+
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). By participating, you agree to follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+## License and attribution
+
+The project source is available under the [MIT License](LICENSE). The bundled viewer uses TradingView Lightweight Charts under Apache-2.0; required notices are in [NOTICE](NOTICE), [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md), and [licenses/Apache-2.0.txt](licenses/Apache-2.0.txt).
