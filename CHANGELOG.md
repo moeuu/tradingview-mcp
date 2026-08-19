@@ -9,15 +9,23 @@ Versioning.
 
 ### Fixed
 
-- Observe repository-managed automatic Codex reviews directly and use the
-  ephemeral GitHub Actions token for commit-bound clean-review verification,
-  without a personal access token or extra secret.
+- Observe repository-managed automatic Codex reviews using only pull request
+  read and commit status write permissions, without a personal access token or
+  extra secret.
 - Accept only commit-bound review evidence and ignore ambiguous pull request
   reactions that could belong to an older in-flight review.
-- Reserve a complete verification window after an automatic clean review.
-- Keep the workflow timeout longer than both bounded review phases combined.
-- Share each review phase deadline with API retries and request timeouts.
-- Invalidate prior review status and request verification after a base retarget.
+- Bound review polling, API retries, and request timeouts within one workflow
+  deadline.
+- Invalidate prior review status and require a new head commit after a base
+  retarget because GitHub review records do not identify the reviewed base.
+- Require head-specific evidence after an overlapping push.
+- Ask for a manual review in the pending status when an automatic review is not
+  acknowledged within two minutes.
+- Preserve simultaneous automatic-review acknowledgement and completion
+  signals, reject reactions at the push timestamp boundary, and bind clean
+  manual results to a trusted maintainer's review request comment.
+- Treat a missing or unsuccessful previous-head review status as an overlapping
+  review instead of accepting ambiguous reactions from concurrent reviews.
 
 ## [0.4.1] - 2026-08-19
 

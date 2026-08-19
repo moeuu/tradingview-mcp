@@ -2,7 +2,11 @@ import { pathToFileURL } from "node:url";
 
 export const CODEX_BOT_LOGIN = "chatgpt-codex-connector[bot]";
 export const CODEX_STATUS_CONTEXT = "codex-review";
-export const GITHUB_ACTIONS_BOT_LOGIN = "github-actions[bot]";
+const TRUSTED_REVIEW_REQUEST_ASSOCIATIONS = new Set([
+  "COLLABORATOR",
+  "MEMBER",
+  "OWNER",
+]);
 const GITHUB_RETRY_BUDGET_MS = 30 * 60 * 1_000;
 const GITHUB_REQUEST_TIMEOUT_MS = 30_000;
 const STATUS_REPORT_TIMEOUT_MS = 2 * 60 * 1_000;
@@ -11,12 +15,20 @@ let apiDeadlineMs = Number.POSITIVE_INFINITY;
 export function detectCodexCompletion({
   reviews,
   reviewSummaryComments = [],
-  commitBoundReactions = [],
   pullRequestReactions = [],
+  reviewRequestComments = [],
   headSha,
   reviewTriggeredAt,
 }) {
   const reviewTriggeredMs = Date.parse(reviewTriggeredAt);
+  const acknowledgement = pullRequestReactions.find(
+    (item) =>
+      item?.user?.login === CODEX_BOT_LOGIN &&
+      item.content === "eyes" &&
+      typeof item.created_at === "string" &&
+      Number.isFinite(reviewTriggeredMs) &&
+      Date.parse(item.created_at) > reviewTriggeredMs,
+  );
   const review = reviews.find(
     (item) =>
       item?.user?.login === CODEX_BOT_LOGIN &&
@@ -30,6 +42,7 @@ export function detectCodexCompletion({
       complete: true,
       outcome: "review",
       completedAt: review.submitted_at,
+      acknowledged: acknowledgement !== undefined,
     };
   }
 
@@ -51,22 +64,37 @@ export function detectCodexCompletion({
       complete: true,
       outcome: "no-suggestions",
       completedAt: summary.created_at,
+      acknowledged: acknowledgement !== undefined,
     };
   }
 
-  const commitBoundReaction = commitBoundReactions.find(
-    (item) =>
-      item?.user?.login === CODEX_BOT_LOGIN &&
-      item.content === "+1" &&
-      typeof item.created_at === "string" &&
-      Number.isFinite(reviewTriggeredMs) &&
-      Date.parse(item.created_at) >= reviewTriggeredMs,
-  );
-  if (commitBoundReaction) {
+  let manualCleanReaction;
+  for (const item of reviewRequestComments) {
+    if (
+      !TRUSTED_REVIEW_REQUEST_ASSOCIATIONS.has(item?.author_association) ||
+      typeof item.body !== "string" ||
+      !/(?:^|\s)@codex\s+review\b/i.test(item.body) ||
+      typeof item.created_at !== "string" ||
+      !Number.isFinite(reviewTriggeredMs) ||
+      Date.parse(item.created_at) <= reviewTriggeredMs ||
+      !Array.isArray(item.reactions)
+    ) continue;
+    const requestCreatedMs = Date.parse(item.created_at);
+    manualCleanReaction = item.reactions.find(
+      (reaction) =>
+        reaction?.user?.login === CODEX_BOT_LOGIN &&
+        reaction.content === "+1" &&
+        typeof reaction.created_at === "string" &&
+        Date.parse(reaction.created_at) >= requestCreatedMs,
+    );
+    if (manualCleanReaction) break;
+  }
+  if (manualCleanReaction) {
     return {
       complete: true,
       outcome: "no-suggestions",
-      completedAt: commitBoundReaction.created_at,
+      completedAt: manualCleanReaction.created_at,
+      acknowledged: acknowledgement !== undefined,
     };
   }
 
@@ -76,36 +104,48 @@ export function detectCodexCompletion({
       item.content === "+1" &&
       typeof item.created_at === "string" &&
       Number.isFinite(reviewTriggeredMs) &&
-      Date.parse(item.created_at) >= reviewTriggeredMs,
+      Date.parse(item.created_at) > reviewTriggeredMs,
   );
   if (reaction) {
     return {
       complete: false,
-      outcome: "verification-required",
+      outcome: "clean-reaction",
       completedAt: reaction.created_at,
+      acknowledged: acknowledgement !== undefined,
     };
   }
 
-  return { complete: false, outcome: "pending", completedAt: null };
+  if (acknowledgement) {
+    return {
+      complete: false,
+      outcome: "in-progress",
+      completedAt: acknowledgement.created_at,
+      acknowledged: true,
+    };
+  }
+
+  return {
+    complete: false,
+    outcome: "pending",
+    completedAt: null,
+    acknowledged: false,
+  };
 }
 
 export function retryableGithubStatus(status) {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
-export function codexRequestReactionState(reactions) {
-  const contents = reactions
-    .filter((item) => item?.user?.login === CODEX_BOT_LOGIN)
-    .map((item) => item.content);
-  return {
-    acknowledged: contents.includes("eyes") || contents.includes("+1"),
-    inProgress: contents.includes("eyes"),
-  };
-}
-
 export function githubRetryAfterMs(value) {
   const seconds = Number(value);
   return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : undefined;
+}
+
+export function previousReviewIsIncomplete(statuses) {
+  const latest = statuses.find(
+    (status) => status?.context === CODEX_STATUS_CONTEXT,
+  );
+  return latest?.state !== "success";
 }
 
 async function githubJson(apiPath, options = {}) {
@@ -178,15 +218,6 @@ async function setStatus(repository, headSha, state, description) {
   });
 }
 
-async function createReviewRequest(repository, pullNumber, headSha) {
-  const marker = `<!-- codex-review-gate:${headSha}:${requiredEnvironment("GITHUB_RUN_ID")}:${requiredEnvironment("GITHUB_RUN_ATTEMPT")} -->`;
-  const created = await githubJson(`/repos/${repository}/issues/${pullNumber}/comments`, {
-    method: "POST",
-    body: { body: `@codex review\n\n${marker}` },
-  });
-  return reviewRequest(created);
-}
-
 async function readCompletion(repository, pullNumber, headSha, reviewTriggeredAt) {
   const [reviews, reviewSummaryComments, pullRequestReactions] = await Promise.all([
     githubPages(`/repos/${repository}/pulls/${pullNumber}/reviews`),
@@ -195,33 +226,41 @@ async function readCompletion(repository, pullNumber, headSha, reviewTriggeredAt
     ),
     githubPages(`/repos/${repository}/issues/${pullNumber}/reactions`),
   ]);
+  const eligibleReviewRequests = reviewSummaryComments
+    .filter(
+      (item) =>
+        typeof item?.id === "number" &&
+        TRUSTED_REVIEW_REQUEST_ASSOCIATIONS.has(item.author_association) &&
+        typeof item.body === "string" &&
+        /(?:^|\s)@codex\s+review\b/i.test(item.body) &&
+        typeof item.created_at === "string" &&
+        Date.parse(item.created_at) > Date.parse(reviewTriggeredAt),
+    )
+    .slice(-10);
+  const reviewRequestComments = await Promise.all(
+    eligibleReviewRequests.map(async (item) => ({
+      ...item,
+      reactions: await githubPages(
+        `/repos/${repository}/issues/comments/${item.id}/reactions`,
+      ),
+    })),
+  );
   return detectCodexCompletion({
     reviews,
     reviewSummaryComments,
     pullRequestReactions,
+    reviewRequestComments,
     headSha,
     reviewTriggeredAt,
   });
 }
 
-async function readRequestedCompletion(repository, pullNumber, headSha, request) {
-  const [reviews, reviewSummaryComments, reviewRequestReactions] = await Promise.all([
-    githubPages(`/repos/${repository}/pulls/${pullNumber}/reviews`),
-    githubPages(
-      `/repos/${repository}/issues/${pullNumber}/comments?since=${encodeURIComponent(request.createdAt)}`,
-    ),
-    githubPages(`/repos/${repository}/issues/comments/${request.id}/reactions`),
-  ]);
-  return {
-    completion: detectCodexCompletion({
-      reviews,
-      reviewSummaryComments,
-      commitBoundReactions: reviewRequestReactions,
-      headSha,
-      reviewTriggeredAt: request.createdAt,
-    }),
-    requestState: codexRequestReactionState(reviewRequestReactions),
-  };
+async function previousHeadReviewIsIncomplete(repository, previousHeadSha) {
+  if (!previousHeadSha) return false;
+  const statuses = await githubPages(
+    `/repos/${repository}/commits/${previousHeadSha}/statuses`,
+  );
+  return previousReviewIsIncomplete(statuses);
 }
 
 async function main() {
@@ -232,7 +271,8 @@ async function main() {
     requiredEnvironment("PR_EVENT_AT"),
     "PR_EVENT_AT",
   );
-  const forceVerification = process.env.FORCE_CODEX_VERIFICATION === "true";
+  const baseRetargeted = process.env.BASE_RETARGETED === "true";
+  const previousHeadSha = optionalSha(process.env.PR_PREVIOUS_SHA, "PR_PREVIOUS_SHA");
 
   const timeoutMs = positiveInteger(
     process.env.CODEX_REVIEW_TIMEOUT_MS ?? "1800000",
@@ -242,19 +282,64 @@ async function main() {
     process.env.CODEX_REVIEW_POLL_MS ?? "15000",
     "CODEX_REVIEW_POLL_MS",
   );
+  const autoStartGraceMs = positiveInteger(
+    process.env.CODEX_AUTO_START_GRACE_MS ?? "120000",
+    "CODEX_AUTO_START_GRACE_MS",
+  );
   const deadline = Date.now() + timeoutMs;
+  const autoStartDeadline = Math.min(deadline, Date.now() + autoStartGraceMs);
+  if (baseRetargeted) {
+    setApiDeadline(Date.now() + STATUS_REPORT_TIMEOUT_MS);
+    await setStatus(
+      repository,
+      headSha,
+      "failure",
+      "Push a new head commit after changing the pull request base",
+    );
+    process.stdout.write(
+      "The pull request base changed; push a new head commit before review.\n",
+    );
+    return;
+  }
   setApiDeadline(deadline);
   await setStatus(repository, headSha, "pending", "Waiting for Codex review on this commit");
   try {
-    let completion = forceVerification
-      ? { complete: false, outcome: "verification-required", completedAt: null }
-      : await readCompletion(repository, pullNumber, headSha, reviewTriggeredAt);
+    const overlappingReview = previousHeadSha && previousHeadSha !== headSha
+      ? await previousHeadReviewIsIncomplete(repository, previousHeadSha)
+      : false;
+    let completion = await readCompletion(
+      repository,
+      pullNumber,
+      headSha,
+      reviewTriggeredAt,
+    );
+    let autoAcknowledged = completion.acknowledged;
+    let manualNoticePublished = false;
 
-    while (
-      !completion.complete &&
-      completion.outcome !== "verification-required" &&
-      Date.now() < deadline
-    ) {
+    while (!completion.complete && Date.now() < deadline) {
+      if (
+        completion.outcome === "clean-reaction" &&
+        autoAcknowledged &&
+        !overlappingReview
+      ) {
+        completion = {
+          complete: true,
+          outcome: "no-suggestions",
+          completedAt: completion.completedAt,
+          acknowledged: true,
+        };
+        break;
+      }
+      if (
+        !manualNoticePublished &&
+        (overlappingReview || Date.now() >= autoStartDeadline)
+      ) {
+        const description = overlappingReview
+          ? "Head-specific Codex review required after overlapping push"
+          : "Automatic Codex review did not start; comment @codex review";
+        await setStatus(repository, headSha, "pending", description);
+        manualNoticePublished = true;
+      }
       await delay(pollMs);
       completion = await readCompletion(
         repository,
@@ -262,25 +347,7 @@ async function main() {
         headSha,
         reviewTriggeredAt,
       );
-    }
-    if (completion.outcome === "verification-required") {
-      const verificationDeadline = Date.now() + timeoutMs;
-      setApiDeadline(verificationDeadline);
-      const request = await createReviewRequest(repository, pullNumber, headSha);
-      let snapshot = await readRequestedCompletion(repository, pullNumber, headSha, request);
-      let requestAcknowledged = snapshot.requestState.acknowledged;
-      let settledSamples = 0;
-      completion = { complete: false, outcome: "pending", completedAt: null };
-      while (!completion.complete && Date.now() < verificationDeadline) {
-        requestAcknowledged ||= snapshot.requestState.acknowledged;
-        settledSamples = requestAcknowledged && !snapshot.requestState.inProgress
-          ? settledSamples + 1
-          : 0;
-        if (settledSamples >= 2) completion = snapshot.completion;
-        if (completion.complete) break;
-        await delay(pollMs);
-        snapshot = await readRequestedCompletion(repository, pullNumber, headSha, request);
-      }
+      autoAcknowledged ||= completion.acknowledged;
     }
     if (!completion.complete) {
       throw new Error("Codex did not finish reviewing the current pull request head in time.");
@@ -298,19 +365,6 @@ async function main() {
     );
     throw error;
   }
-}
-
-function reviewRequest(value) {
-  if (
-    !value ||
-    value?.user?.login !== GITHUB_ACTIONS_BOT_LOGIN ||
-    !Number.isSafeInteger(value.id) ||
-    typeof value.created_at !== "string" ||
-    !Number.isFinite(Date.parse(value.created_at))
-  ) {
-    throw new Error("The Codex verification request comment response was incomplete.");
-  }
-  return { id: value.id, createdAt: value.created_at };
 }
 
 function setApiDeadline(deadlineMs) {
@@ -342,6 +396,13 @@ function positiveInteger(value, name) {
 function exactSha(value) {
   if (!/^[a-f0-9]{40}$/.test(value)) throw new Error("PR_HEAD_SHA must be a full commit SHA.");
   return value;
+}
+
+function optionalSha(value, name) {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  if (!/^[a-f0-9]{40}$/.test(normalized)) throw new Error(`${name} must be a full commit SHA.`);
+  return normalized;
 }
 
 function exactTimestamp(value, name) {

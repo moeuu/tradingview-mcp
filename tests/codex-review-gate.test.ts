@@ -5,10 +5,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   CODEX_BOT_LOGIN,
-  GITHUB_ACTIONS_BOT_LOGIN,
-  codexRequestReactionState,
   detectCodexCompletion,
   githubRetryAfterMs,
+  previousReviewIsIncomplete,
   retryableGithubStatus,
 } from "../scripts/codex-review-gate.mjs";
 
@@ -19,7 +18,6 @@ const REPOSITORY_ROOT = fileURLToPath(new URL("..", import.meta.url));
 describe("Codex review gate", () => {
   it("pins the trusted identities used by the gate", () => {
     expect(CODEX_BOT_LOGIN).toBe("chatgpt-codex-connector[bot]");
-    expect(GITHUB_ACTIONS_BOT_LOGIN).toBe("github-actions[bot]");
   });
 
   it("uses only pull request and status scopes for automatic review verification", () => {
@@ -31,10 +29,12 @@ describe("Codex review gate", () => {
     expect(gate).toContain("pull_request_target:");
     expect(gate).toContain("types: [edited, opened, ready_for_review, synchronize]");
     expect(gate).toContain("github.event.changes.base.ref.from != null");
-    expect(gate).toContain("FORCE_CODEX_VERIFICATION:");
-    expect(gate).toContain("timeout-minutes: 70");
+    expect(gate).toContain("BASE_RETARGETED:");
+    expect(gate).toContain("PR_PREVIOUS_SHA:");
+    expect(gate).toContain("timeout-minutes: 35");
     expect(gate).not.toContain("issues: write");
-    expect(gate).toContain("pull-requests: write");
+    expect(gate).toContain("pull-requests: read");
+    expect(gate).not.toContain("pull-requests: write");
     expect(gate).toContain("statuses: write");
     expect(gate).toContain("github.event.pull_request.updated_at");
     const gateScript = readFileSync(
@@ -42,25 +42,14 @@ describe("Codex review gate", () => {
       "utf8",
     );
     expect(gateScript).toContain("AbortSignal.timeout(requestBudgetMs)");
-    expect(gateScript).toContain("process.env.FORCE_CODEX_VERIFICATION === \"true\"");
-    expect(gateScript).toContain("setApiDeadline(verificationDeadline)");
-  });
-
-  it("tracks the commit-bound verification request lifecycle", () => {
-    expect(codexRequestReactionState([])).toEqual({
-      acknowledged: false,
-      inProgress: false,
-    });
-    expect(
-      codexRequestReactionState([
-        { user: { login: CODEX_BOT_LOGIN }, content: "eyes" },
-      ]),
-    ).toEqual({ acknowledged: true, inProgress: true });
-    expect(
-      codexRequestReactionState([
-        { user: { login: CODEX_BOT_LOGIN }, content: "+1" },
-      ]),
-    ).toEqual({ acknowledged: true, inProgress: false });
+    expect(gateScript).toContain(
+      "process.env.BASE_RETARGETED === \"true\"",
+    );
+    expect(gateScript).toContain(
+      "Push a new head commit after changing the pull request base",
+    );
+    expect(gateScript).toContain("previousHeadReviewIsIncomplete");
+    expect(gateScript).toContain("CODEX_AUTO_START_GRACE_MS");
   });
 
   it("accepts a submitted Codex review only for the current head", () => {
@@ -92,7 +81,12 @@ describe("Codex review gate", () => {
       ],
     });
 
-    expect(result).toEqual({ complete: false, outcome: "pending", completedAt: null });
+    expect(result).toEqual({
+      complete: false,
+      outcome: "pending",
+      completedAt: null,
+      acknowledged: false,
+    });
   });
 
   it("rejects an exact-head review submitted before the pull request event", () => {
@@ -108,10 +102,15 @@ describe("Codex review gate", () => {
       ],
     });
 
-    expect(result).toEqual({ complete: false, outcome: "pending", completedAt: null });
+    expect(result).toEqual({
+      complete: false,
+      outcome: "pending",
+      completedAt: null,
+      acknowledged: false,
+    });
   });
 
-  it("requires commit-bound verification after an automatic thumbs-up", () => {
+  it("keeps an automatic thumbs-up separate from commit-bound evidence", () => {
     const result = detectCodexCompletion({
       headSha: HEAD_SHA,
       reviewTriggeredAt: REVIEW_TRIGGERED_AT,
@@ -127,17 +126,50 @@ describe("Codex review gate", () => {
 
     expect(result).toEqual({
       complete: false,
-      outcome: "verification-required",
+      outcome: "clean-reaction",
       completedAt: "2026-08-19T08:05:00Z",
+      acknowledged: false,
     });
   });
 
-  it("accepts a thumbs-up on the head-specific verification request", () => {
+  it("rejects an automatic reaction at the pull request event boundary", () => {
     const result = detectCodexCompletion({
       headSha: HEAD_SHA,
       reviewTriggeredAt: REVIEW_TRIGGERED_AT,
       reviews: [],
-      commitBoundReactions: [
+      pullRequestReactions: [
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          content: "+1",
+          created_at: REVIEW_TRIGGERED_AT,
+        },
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          content: "eyes",
+          created_at: "2026-08-19T08:00:10Z",
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      complete: false,
+      outcome: "in-progress",
+      completedAt: "2026-08-19T08:00:10Z",
+      acknowledged: true,
+    });
+  });
+
+  it("preserves an acknowledgement observed with a clean reaction", () => {
+    const result = detectCodexCompletion({
+      headSha: HEAD_SHA,
+      reviewTriggeredAt: REVIEW_TRIGGERED_AT,
+      reviews: [],
+      pullRequestReactions: [
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          content: "eyes",
+          created_at: "2026-08-19T08:00:10Z",
+        },
         {
           user: { login: CODEX_BOT_LOGIN },
           content: "+1",
@@ -147,9 +179,90 @@ describe("Codex review gate", () => {
     });
 
     expect(result).toEqual({
+      complete: false,
+      outcome: "clean-reaction",
+      completedAt: "2026-08-19T08:05:00Z",
+      acknowledged: true,
+    });
+  });
+
+  it("recognizes a fresh automatic-review acknowledgement", () => {
+    const result = detectCodexCompletion({
+      headSha: HEAD_SHA,
+      reviewTriggeredAt: REVIEW_TRIGGERED_AT,
+      reviews: [],
+      pullRequestReactions: [
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          content: "eyes",
+          created_at: "2026-08-19T08:00:10Z",
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      complete: false,
+      outcome: "in-progress",
+      completedAt: "2026-08-19T08:00:10Z",
+      acknowledged: true,
+    });
+  });
+
+  it("accepts a clean manual review bound to a trusted request comment", () => {
+    const result = detectCodexCompletion({
+      headSha: HEAD_SHA,
+      reviewTriggeredAt: REVIEW_TRIGGERED_AT,
+      reviews: [],
+      reviewRequestComments: [
+        {
+          author_association: "OWNER",
+          body: "@codex review",
+          created_at: "2026-08-19T08:01:00Z",
+          reactions: [
+            {
+              user: { login: CODEX_BOT_LOGIN },
+              content: "+1",
+              created_at: "2026-08-19T08:05:00Z",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toEqual({
       complete: true,
       outcome: "no-suggestions",
       completedAt: "2026-08-19T08:05:00Z",
+      acknowledged: false,
+    });
+  });
+
+  it("rejects a clean review request from an untrusted commenter", () => {
+    const result = detectCodexCompletion({
+      headSha: HEAD_SHA,
+      reviewTriggeredAt: REVIEW_TRIGGERED_AT,
+      reviews: [],
+      reviewRequestComments: [
+        {
+          author_association: "NONE",
+          body: "@codex review",
+          created_at: "2026-08-19T08:01:00Z",
+          reactions: [
+            {
+              user: { login: CODEX_BOT_LOGIN },
+              content: "+1",
+              created_at: "2026-08-19T08:05:00Z",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      complete: false,
+      outcome: "pending",
+      completedAt: null,
+      acknowledged: false,
     });
   });
 
@@ -189,7 +302,12 @@ describe("Codex review gate", () => {
       ],
     });
 
-    expect(result).toEqual({ complete: false, outcome: "pending", completedAt: null });
+    expect(result).toEqual({
+      complete: false,
+      outcome: "pending",
+      completedAt: null,
+      acknowledged: false,
+    });
   });
 
   it("retries only transient GitHub response statuses", () => {
@@ -200,5 +318,33 @@ describe("Codex review gate", () => {
   it("honors GitHub Retry-After durations without a ten-second cap", () => {
     expect(githubRetryAfterMs("45")).toBe(45_000);
     expect(githubRetryAfterMs("invalid")).toBeUndefined();
+  });
+
+  it("treats a missing or unsuccessful previous-head review as overlapping", () => {
+    expect(previousReviewIsIncomplete([])).toBe(true);
+    expect(
+      previousReviewIsIncomplete([
+        { context: "codex-review", state: "pending" },
+      ]),
+    ).toBe(true);
+    expect(
+      previousReviewIsIncomplete([
+        { context: "codex-review", state: "failure" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("recognizes only an explicit previous-head success as complete", () => {
+    expect(
+      previousReviewIsIncomplete([
+        { context: "codex-review", state: "success" },
+        { context: "codex-review", state: "pending" },
+      ]),
+    ).toBe(false);
+    expect(
+      previousReviewIsIncomplete([
+        { context: "another-check", state: "success" },
+      ]),
+    ).toBe(true);
   });
 });
