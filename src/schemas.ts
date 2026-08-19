@@ -151,6 +151,80 @@ export const TradingViewSnapshotInputSchema = z
   })
   .strict();
 
+export const DateOnlySchema = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((value) => {
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  }, "Date must be a real calendar date in YYYY-MM-DD format.");
+
+export const IanaTimezoneSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  .refine((value) => {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: value }).format(0);
+      return true;
+    } catch {
+      return false;
+    }
+  }, "Timezone must be a valid IANA timezone such as UTC, America/New_York, or Asia/Tokyo.");
+
+const TradingViewDateRangeSchema = z
+  .object({
+    symbol: SymbolSchema.describe(
+      "TradingView symbol, preferably EXCHANGE:TICKER such as NASDAQ:AAPL.",
+    ),
+    interval: TradingViewIntervalSchema.default("D"),
+    from: DateOnlySchema.describe("First visible calendar date, in YYYY-MM-DD format."),
+    to: DateOnlySchema.describe("Last visible calendar date, in YYYY-MM-DD format."),
+    layoutId: TradingViewLayoutIdSchema.optional(),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (input.from > input.to) {
+      context.addIssue({
+        code: "custom",
+        path: ["to"],
+        message: "The end date must be on or after the start date.",
+      });
+    }
+  });
+
+export const TradingViewPeriodScreenshotInputSchema = TradingViewDateRangeSchema.safeExtend({
+  width: z.number().int().min(640).max(2_560).default(1_440),
+  height: z.number().int().min(480).max(1_800).default(900),
+  chartOnly: z.boolean().default(true),
+  keepBrowserOpen: z.boolean().default(false),
+}).strict();
+
+export const TradingViewDayInputSchema = z
+  .object({
+    symbol: SymbolSchema.describe(
+      "TradingView symbol, preferably EXCHANGE:TICKER such as NASDAQ:AAPL.",
+    ),
+    date: DateOnlySchema.describe("Requested market date in YYYY-MM-DD format."),
+    interval: TradingViewIntervalSchema.default("D").describe(
+      "D returns the session candle; an intraday interval returns and aggregates every exported bar on that date.",
+    ),
+    timezone: IanaTimezoneSchema.default("UTC").describe(
+      "IANA timezone used to decide which exported bars belong to the requested calendar date.",
+    ),
+    lookbackBars: z.number().int().min(2).max(MAX_BARS).default(500).describe(
+      "Maximum exported bars retained through the requested date for comparisons and technical analysis.",
+    ),
+    includeBars: z.boolean().default(false).describe(
+      "Include every matching intraday bar. The default response keeps only the aggregate and analysis.",
+    ),
+    layoutId: TradingViewLayoutIdSchema.optional(),
+    keepBrowserOpen: z.boolean().default(false),
+  })
+  .strict();
+
 export const TradingViewCaptureIntervalSchema = z.enum(["5", "60", "240", "D", "W", "M"]);
 
 export const TradingViewCaptureIntervalOrderSchema = z.tuple([

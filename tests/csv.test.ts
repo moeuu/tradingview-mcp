@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { loadBarsFromCsv, parseBarsCsv } from "../src/csv.js";
+import { loadBarsFromCsv, loadBarsWithFieldsFromCsv, parseBarsCsv } from "../src/csv.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -86,6 +86,26 @@ describe("loadBarsFromCsv", () => {
     expect(relative).toEqual(absolute);
     expect(relative.path).toBe(csvPath);
     expect(relative.bars).toHaveLength(1);
+  });
+
+  it("retains every non-OHLCV export column with stable names", async () => {
+    const root = await temporaryDirectory();
+    const csvPath = path.join(root, "fields.csv");
+    await writeFile(
+      csvPath,
+      "time,open,high,low,close,volume,MA,MA,RSI,Signal label\n" +
+        "1700000000,10,12,9,11,100,10.5,10.7,55.2,Bullish\n",
+      "utf8",
+    );
+
+    const loaded = await loadBarsWithFieldsFromCsv("fields.csv", root);
+
+    expect(loaded.rows).toEqual([
+      {
+        bar: { time: 1_700_000_000, open: 10, high: 12, low: 9, close: 11, volume: 100 },
+        fields: { ma: 10.5, ma_2: 10.7, rsi: 55.2, signal_label: "Bullish" },
+      },
+    ]);
   });
 
   it("blocks parent-directory traversal, absolute paths outside the root, and escaping symlinks", async () => {

@@ -51,9 +51,9 @@ describe("MCP stdio server", () => {
 
       expect(client.getServerVersion()).toMatchObject({
         name: "tradingview-mcp",
-        version: "0.3.0",
+        version: "0.4.0",
       });
-      expect(client.getInstructions()).toContain("tradingview_analyze_symbol");
+      expect(client.getInstructions()).toContain("tradingview_get_day");
       expect(client.getInstructions()).toContain("start on demand");
 
       const listed = await client.listTools();
@@ -66,6 +66,8 @@ describe("MCP stdio server", () => {
           "chart_apply_overlays",
           "tradingview_get_history",
           "tradingview_analyze_symbol",
+          "tradingview_get_day",
+          "tradingview_capture_period",
           "tradingview_open_chart",
           "tradingview_export_chart",
           "tradingview_snapshot",
@@ -76,6 +78,27 @@ describe("MCP stdio server", () => {
       const historyTool = listed.tools.find((tool) => tool.name === "tradingview_get_history");
       expect(historyTool?.inputSchema).toMatchObject({
         properties: { includeBars: { default: false } },
+      });
+      const dayTool = listed.tools.find((tool) => tool.name === "tradingview_get_day");
+      expect(dayTool?.inputSchema).toMatchObject({
+        properties: {
+          interval: { default: "D" },
+          timezone: { default: "UTC" },
+          lookbackBars: { default: 500 },
+          includeBars: { default: false },
+        },
+        required: expect.arrayContaining(["symbol", "date"]),
+      });
+      const periodTool = listed.tools.find(
+        (tool) => tool.name === "tradingview_capture_period",
+      );
+      expect(periodTool?.inputSchema).toMatchObject({
+        properties: {
+          interval: { default: "D" },
+          chartOnly: { default: true },
+          keepBrowserOpen: { default: false },
+        },
+        required: expect.arrayContaining(["symbol", "from", "to"]),
       });
 
       const initialCapabilities = structuredContent(

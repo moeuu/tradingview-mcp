@@ -11,6 +11,11 @@ interface CsvLoadOptions {
   tailBars?: number | undefined;
 }
 
+export interface CsvBarWithFields {
+  bar: Bar;
+  fields: Record<string, string | number | null>;
+}
+
 export async function loadBarsFromCsv(
   requestedPath: string,
   dataRoot: string,
@@ -49,6 +54,47 @@ export async function loadBarsFromCsv(
   return { ...parsed, path: resolved };
 }
 
+export async function loadBarsWithFieldsFromCsv(
+  requestedPath: string,
+  dataRoot: string,
+  options: CsvLoadOptions = {},
+): Promise<{
+  bars: Bar[];
+  rows: CsvBarWithFields[];
+  path: string;
+  sourceBarCount: number;
+  truncated: boolean;
+}> {
+  const loaded = await loadBarsFromCsv(requestedPath, dataRoot, options);
+  const source = await readFile(loaded.path, "utf8");
+  const records = parse(source, {
+    columns: uniqueNormalizedHeaders,
+    skip_empty_lines: true,
+    trim: true,
+    bom: true,
+    max_record_size: 1_000_000,
+  }) as Array<Record<string, unknown>>;
+  let rows = records.map((record) => ({
+    bar: normalizeBar(record),
+    fields: Object.fromEntries(
+      Object.entries(record)
+        .filter(([name]) => !["time", "open", "high", "low", "close", "volume"].includes(name))
+        .map(([name, value]) => [name, scalarField(value)]),
+    ),
+  }));
+  if (rows.length >= 2 && rows[0]!.bar.time > rows.at(-1)!.bar.time) rows.reverse();
+  if (options.tailBars !== undefined && rows.length > options.tailBars) {
+    rows = rows.slice(-options.tailBars);
+  }
+  if (
+    rows.length !== loaded.bars.length ||
+    rows.some((row, index) => row.bar.time !== loaded.bars[index]?.time)
+  ) {
+    throw new Error("CSV field rows do not align with parsed OHLCV bars.");
+  }
+  return { ...loaded, rows };
+}
+
 export function parseBarsCsv(source: string, options: { tailBars?: number } = {}): Bar[] {
   return parseBarsCsvDetailed(source, options.tailBars).bars;
 }
@@ -83,4 +129,23 @@ function parseBarsCsvDetailed(
   }
   validateBars(bars);
   return { bars, sourceBarCount, truncated: sourceBarCount !== bars.length };
+}
+
+function uniqueNormalizedHeaders(headers: string[]): string[] {
+  const counts = new Map<string, number>();
+  return headers.map((header, index) => {
+    const base = header.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || `field_${index + 1}`;
+    const count = (counts.get(base) ?? 0) + 1;
+    counts.set(base, count);
+    return count === 1 ? base : `${base}_${count}`;
+  });
+}
+
+function scalarField(value: unknown): string | number | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : String(value);
+  const text = String(value).trim();
+  if (text === "") return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : text;
 }

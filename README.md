@@ -14,6 +14,8 @@ The server runs over stdio and starts its local viewer and Playwright browsers o
 ## Features
 
 - MCP tools for market discovery, quotes, OHLCV, analysis, and chart state
+- One-call official TradingView screenshots for an exact symbol, interval, and date range
+- One-call historical-date context with OHLCV, gaps, changes, volume, exported indicator fields, rolling performance, and technical analysis
 - Deterministic SMA, EMA, RSI, MACD, Bollinger Bands, ATR, trend, signal, and support/resistance calculations
 - Local Lightweight Charts viewer with PNG capture
 - CSV, inline OHLCV, demo data, and optional configured upstream support
@@ -88,12 +90,42 @@ See [MCP client setup and compatibility](docs/MCP_CLIENTS.md) for transport beha
 ## Recommended MCP workflow
 
 1. Call `market_get_capabilities` when provider availability is unclear.
-2. Use `tradingview_analyze_symbol` for one-call Supercharts export plus deterministic analysis.
-3. Use `tradingview_get_history` when only history is needed.
-4. Use `chart_import_csv` or `chart_set_data` for local/user-provided data.
-5. Use `chart_analyze`, `chart_apply_overlays`, and `chart_snapshot` for local analysis and visualization.
+2. Use `tradingview_get_day` for comprehensive information about a symbol on a specific date.
+3. Use `tradingview_capture_period` for an official Supercharts PNG covering exact calendar dates.
+4. Use `tradingview_analyze_symbol` for one-call recent history plus deterministic analysis.
+5. Use `tradingview_get_history` when only recent history is needed.
+6. Use `chart_import_csv` or `chart_set_data` for local/user-provided data.
+7. Use `chart_analyze`, `chart_apply_overlays`, and `chart_snapshot` for local analysis and visualization.
 
-`tradingview_get_history` and `tradingview_analyze_symbol` return a compact history summary and close the browser by default. Set `includeBars: true` only when raw bars are required in the MCP response, and `keepBrowserOpen: true` only for immediate follow-up browser tools.
+Example calls:
+
+```json
+{
+  "name": "tradingview_capture_period",
+  "arguments": {
+    "symbol": "NASDAQ:AAPL",
+    "interval": "D",
+    "from": "2024-01-02",
+    "to": "2024-03-28"
+  }
+}
+```
+
+```json
+{
+  "name": "tradingview_get_day",
+  "arguments": {
+    "symbol": "NASDAQ:AAPL",
+    "date": "2024-01-03",
+    "interval": "D",
+    "timezone": "America/New_York"
+  }
+}
+```
+
+`tradingview_get_day` returns an explicit `no_session_bar` status for weekends, holidays, and unavailable dates rather than silently substituting a nearby session. On a matching date it returns session OHLCV, previous and next bars when loaded, prior-close and open-gap changes, intraday range, rolling 5/20/50/200-period performance, deterministic indicators and signals, and every additional indicator column present in the official TradingView chart export. Set an intraday `interval` and `includeBars:true` to receive all exported bars assigned to that date.
+
+High-level TradingView tools close the browser by default. Set `includeBars: true` only when raw bars are required in the MCP response, and `keepBrowserOpen: true` only for immediate follow-up browser tools.
 
 The server exposes both high-level and granular tools. Clients that support an `enabled_tools` allowlist can expose only the tools needed for a given workflow.
 
