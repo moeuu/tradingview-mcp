@@ -29,7 +29,12 @@ interface CodexReviewGateInput {
 
 interface CodexReviewGateResult {
   complete: boolean;
-  outcome: "review" | "no-suggestions" | "verification-required" | "pending";
+  outcome:
+    | "review"
+    | "no-suggestions"
+    | "verification-required"
+    | "in-progress"
+    | "pending";
   completedAt: string | null;
 }
 

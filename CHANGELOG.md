@@ -18,6 +18,8 @@ Versioning.
 - Keep the workflow timeout longer than both bounded review phases combined.
 - Share each review phase deadline with API retries and request timeouts.
 - Invalidate prior review status and request verification after a base retarget.
+- Fall back to commit-bound verification when an automatic review is not
+  acknowledged within two minutes.
 
 ## [0.4.1] - 2026-08-19
 

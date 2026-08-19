@@ -44,6 +44,10 @@ token and requires no personal access token or extra secret. The gate runs only
 trusted code from the default branch and never checks out or executes pull
 request code with its scoped token.
 
+If Codex does not acknowledge an automatic review within two minutes, the gate
+uses the same commit-bound verification path instead of waiting for a silent
+automatic trigger for the full review timeout.
+
 The gate runs when a pull request is opened, marked ready for review, receives a
 new commit, or is retargeted to `main`. A base retarget immediately invalidates
 the previous status and requests a commit-bound review of the new diff.

@@ -86,6 +86,22 @@ export function detectCodexCompletion({
     };
   }
 
+  const acknowledgement = pullRequestReactions.find(
+    (item) =>
+      item?.user?.login === CODEX_BOT_LOGIN &&
+      item.content === "eyes" &&
+      typeof item.created_at === "string" &&
+      Number.isFinite(reviewTriggeredMs) &&
+      Date.parse(item.created_at) >= reviewTriggeredMs,
+  );
+  if (acknowledgement) {
+    return {
+      complete: false,
+      outcome: "in-progress",
+      completedAt: acknowledgement.created_at,
+    };
+  }
+
   return { complete: false, outcome: "pending", completedAt: null };
 }
 
@@ -242,17 +258,24 @@ async function main() {
     process.env.CODEX_REVIEW_POLL_MS ?? "15000",
     "CODEX_REVIEW_POLL_MS",
   );
+  const autoStartGraceMs = positiveInteger(
+    process.env.CODEX_AUTO_START_GRACE_MS ?? "120000",
+    "CODEX_AUTO_START_GRACE_MS",
+  );
   const deadline = Date.now() + timeoutMs;
+  const autoStartDeadline = Math.min(deadline, Date.now() + autoStartGraceMs);
   setApiDeadline(deadline);
   await setStatus(repository, headSha, "pending", "Waiting for Codex review on this commit");
   try {
     let completion = forceVerification
       ? { complete: false, outcome: "verification-required", completedAt: null }
       : await readCompletion(repository, pullNumber, headSha, reviewTriggeredAt);
+    let autoAcknowledged = completion.outcome === "in-progress";
 
     while (
       !completion.complete &&
       completion.outcome !== "verification-required" &&
+      (autoAcknowledged || Date.now() < autoStartDeadline) &&
       Date.now() < deadline
     ) {
       await delay(pollMs);
@@ -262,6 +285,10 @@ async function main() {
         headSha,
         reviewTriggeredAt,
       );
+      autoAcknowledged ||= completion.outcome === "in-progress";
+    }
+    if (!completion.complete && completion.outcome !== "verification-required") {
+      completion = { complete: false, outcome: "verification-required", completedAt: null };
     }
     if (completion.outcome === "verification-required") {
       const verificationDeadline = Date.now() + timeoutMs;

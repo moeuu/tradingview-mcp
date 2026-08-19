@@ -44,6 +44,7 @@ describe("Codex review gate", () => {
     expect(gateScript).toContain("AbortSignal.timeout(requestBudgetMs)");
     expect(gateScript).toContain("process.env.FORCE_CODEX_VERIFICATION === \"true\"");
     expect(gateScript).toContain("setApiDeadline(verificationDeadline)");
+    expect(gateScript).toContain("CODEX_AUTO_START_GRACE_MS");
   });
 
   it("tracks the commit-bound verification request lifecycle", () => {
@@ -129,6 +130,27 @@ describe("Codex review gate", () => {
       complete: false,
       outcome: "verification-required",
       completedAt: "2026-08-19T08:05:00Z",
+    });
+  });
+
+  it("recognizes a fresh automatic-review acknowledgement", () => {
+    const result = detectCodexCompletion({
+      headSha: HEAD_SHA,
+      reviewTriggeredAt: REVIEW_TRIGGERED_AT,
+      reviews: [],
+      pullRequestReactions: [
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          content: "eyes",
+          created_at: "2026-08-19T08:00:10Z",
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      complete: false,
+      outcome: "in-progress",
+      completedAt: "2026-08-19T08:00:10Z",
     });
   });
 
