@@ -1,0 +1,21 @@
+name: Codex review trigger
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [edited, opened, reopened, ready_for_review, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  signal:
+    if: >-
+      github.event.pull_request.draft == false &&
+      (github.event.action != 'edited' || github.event.changes.base.ref.from != null)
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+
+    steps:
+      - name: Signal a trusted Codex review request
+        run: echo "The privileged gate runs after this read-only workflow completes."

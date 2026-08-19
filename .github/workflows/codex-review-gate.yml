@@ -1,9 +1,9 @@
 name: Codex review gate
 
 on:
-  pull_request_target:
-    branches: [main]
-    types: [edited, opened, reopened, ready_for_review, synchronize]
+  workflow_run:
+    workflows: [Codex review trigger]
+    types: [completed]
 
 permissions:
   contents: read
@@ -14,12 +14,13 @@ permissions:
 jobs:
   wait-for-codex:
     if: >-
-      github.event.pull_request.draft == false &&
-      (github.event.action != 'edited' || github.event.changes.base.ref.from != null)
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request_target' &&
+      github.event.workflow_run.pull_requests[0].number != null
     runs-on: ubuntu-latest
     timeout-minutes: 35
     concurrency:
-      group: codex-review-${{ github.event.pull_request.number }}
+      group: codex-review-${{ github.event.workflow_run.pull_requests[0].number }}
       cancel-in-progress: true
 
     steps:
@@ -32,6 +33,6 @@ jobs:
       - name: Wait for Codex review of the pull request head
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: node scripts/codex-review-gate.mjs

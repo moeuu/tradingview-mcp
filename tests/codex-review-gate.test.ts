@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -11,11 +14,32 @@ import {
 
 const HEAD_SHA = "0123456789abcdef0123456789abcdef01234567";
 const REVIEW_REQUESTED_AT = "2026-08-19T08:00:00Z";
+const REPOSITORY_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 describe("Codex review gate", () => {
   it("pins the trusted identities used by the gate", () => {
     expect(CODEX_BOT_LOGIN).toBe("chatgpt-codex-connector[bot]");
     expect(GITHUB_ACTIONS_BOT_LOGIN).toBe("github-actions[bot]");
+  });
+
+  it("separates the read-only pull request trigger from the privileged gate", () => {
+    const trigger = readFileSync(
+      `${REPOSITORY_ROOT}/.github/workflows/codex-review-trigger.yml`,
+      "utf8",
+    );
+    const gate = readFileSync(
+      `${REPOSITORY_ROOT}/.github/workflows/codex-review-gate.yml`,
+      "utf8",
+    );
+
+    expect(trigger).toContain("pull_request_target:");
+    expect(trigger).toContain("contents: read");
+    expect(trigger).not.toContain("issues: write");
+    expect(trigger).not.toContain("statuses: write");
+    expect(gate).toContain("workflow_run:");
+    expect(gate).toContain("issues: write");
+    expect(gate).toContain("statuses: write");
+    expect(gate).toContain("github.event.workflow_run.head_sha");
   });
 
   it("tracks the current request acknowledgement lifecycle", () => {
