@@ -30,6 +30,7 @@ describe("Codex review gate", () => {
 
     expect(gate).toContain("pull_request_target:");
     expect(gate).toContain("types: [opened, ready_for_review, synchronize]");
+    expect(gate).toContain("timeout-minutes: 70");
     expect(gate).not.toContain("issues: write");
     expect(gate).toContain("pull-requests: write");
     expect(gate).toContain("statuses: write");
