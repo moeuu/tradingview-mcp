@@ -50,3 +50,10 @@ export function detectCodexCompletion(
 export function retryableGithubStatus(status: number): boolean;
 
 export function githubRetryAfterMs(value: string | null): number | undefined;
+
+export function previousReviewIsIncomplete(
+  statuses: Array<{
+    context?: string | undefined;
+    state?: string | undefined;
+  }>,
+): boolean;

@@ -141,6 +141,13 @@ export function githubRetryAfterMs(value) {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : undefined;
 }
 
+export function previousReviewIsIncomplete(statuses) {
+  const latest = statuses.find(
+    (status) => status?.context === CODEX_STATUS_CONTEXT,
+  );
+  return latest?.state !== "success";
+}
+
 async function githubJson(apiPath, options = {}) {
   const method = options.method ?? "GET";
   const attempts = method === "GET" || options.retryTransient === true ? 4 : 1;
@@ -248,13 +255,12 @@ async function readCompletion(repository, pullNumber, headSha, reviewTriggeredAt
   });
 }
 
-async function previousReviewIsPending(repository, previousHeadSha) {
+async function previousHeadReviewIsIncomplete(repository, previousHeadSha) {
   if (!previousHeadSha) return false;
   const statuses = await githubPages(
     `/repos/${repository}/commits/${previousHeadSha}/statuses`,
   );
-  const latest = statuses.find((status) => status?.context === CODEX_STATUS_CONTEXT);
-  return latest?.state === "pending";
+  return previousReviewIsIncomplete(statuses);
 }
 
 async function main() {
@@ -299,7 +305,7 @@ async function main() {
   await setStatus(repository, headSha, "pending", "Waiting for Codex review on this commit");
   try {
     const overlappingReview = previousHeadSha && previousHeadSha !== headSha
-      ? await previousReviewIsPending(repository, previousHeadSha)
+      ? await previousHeadReviewIsIncomplete(repository, previousHeadSha)
       : false;
     let completion = await readCompletion(
       repository,

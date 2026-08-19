@@ -24,6 +24,8 @@ Versioning.
 - Preserve simultaneous automatic-review acknowledgement and completion
   signals, reject reactions at the push timestamp boundary, and bind clean
   manual results to a trusted maintainer's review request comment.
+- Treat a missing or unsuccessful previous-head review status as an overlapping
+  review instead of accepting ambiguous reactions from concurrent reviews.
 
 ## [0.4.1] - 2026-08-19
 

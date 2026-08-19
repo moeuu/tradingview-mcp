@@ -7,6 +7,7 @@ import {
   CODEX_BOT_LOGIN,
   detectCodexCompletion,
   githubRetryAfterMs,
+  previousReviewIsIncomplete,
   retryableGithubStatus,
 } from "../scripts/codex-review-gate.mjs";
 
@@ -47,7 +48,7 @@ describe("Codex review gate", () => {
     expect(gateScript).toContain(
       "Push a new head commit after changing the pull request base",
     );
-    expect(gateScript).toContain("previousReviewIsPending");
+    expect(gateScript).toContain("previousHeadReviewIsIncomplete");
     expect(gateScript).toContain("CODEX_AUTO_START_GRACE_MS");
   });
 
@@ -317,5 +318,33 @@ describe("Codex review gate", () => {
   it("honors GitHub Retry-After durations without a ten-second cap", () => {
     expect(githubRetryAfterMs("45")).toBe(45_000);
     expect(githubRetryAfterMs("invalid")).toBeUndefined();
+  });
+
+  it("treats a missing or unsuccessful previous-head review as overlapping", () => {
+    expect(previousReviewIsIncomplete([])).toBe(true);
+    expect(
+      previousReviewIsIncomplete([
+        { context: "codex-review", state: "pending" },
+      ]),
+    ).toBe(true);
+    expect(
+      previousReviewIsIncomplete([
+        { context: "codex-review", state: "failure" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("recognizes only an explicit previous-head success as complete", () => {
+    expect(
+      previousReviewIsIncomplete([
+        { context: "codex-review", state: "success" },
+        { context: "codex-review", state: "pending" },
+      ]),
+    ).toBe(false);
+    expect(
+      previousReviewIsIncomplete([
+        { context: "another-check", state: "success" },
+      ]),
+    ).toBe(true);
   });
 });
