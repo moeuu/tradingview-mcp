@@ -232,6 +232,7 @@ async function main() {
     requiredEnvironment("PR_EVENT_AT"),
     "PR_EVENT_AT",
   );
+  const forceVerification = process.env.FORCE_CODEX_VERIFICATION === "true";
 
   const timeoutMs = positiveInteger(
     process.env.CODEX_REVIEW_TIMEOUT_MS ?? "1800000",
@@ -245,12 +246,9 @@ async function main() {
   setApiDeadline(deadline);
   await setStatus(repository, headSha, "pending", "Waiting for Codex review on this commit");
   try {
-    let completion = await readCompletion(
-      repository,
-      pullNumber,
-      headSha,
-      reviewTriggeredAt,
-    );
+    let completion = forceVerification
+      ? { complete: false, outcome: "verification-required", completedAt: null }
+      : await readCompletion(repository, pullNumber, headSha, reviewTriggeredAt);
 
     while (
       !completion.complete &&

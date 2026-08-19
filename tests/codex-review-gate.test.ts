@@ -29,7 +29,9 @@ describe("Codex review gate", () => {
     );
 
     expect(gate).toContain("pull_request_target:");
-    expect(gate).toContain("types: [opened, ready_for_review, synchronize]");
+    expect(gate).toContain("types: [edited, opened, ready_for_review, synchronize]");
+    expect(gate).toContain("github.event.changes.base.ref.from != null");
+    expect(gate).toContain("FORCE_CODEX_VERIFICATION:");
     expect(gate).toContain("timeout-minutes: 70");
     expect(gate).not.toContain("issues: write");
     expect(gate).toContain("pull-requests: write");
@@ -40,6 +42,7 @@ describe("Codex review gate", () => {
       "utf8",
     );
     expect(gateScript).toContain("AbortSignal.timeout(requestBudgetMs)");
+    expect(gateScript).toContain("process.env.FORCE_CODEX_VERIFICATION === \"true\"");
     expect(gateScript).toContain("setApiDeadline(verificationDeadline)");
   });
 

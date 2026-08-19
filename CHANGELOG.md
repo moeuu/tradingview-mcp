@@ -17,6 +17,7 @@ Versioning.
 - Reserve a complete verification window after an automatic clean review.
 - Keep the workflow timeout longer than both bounded review phases combined.
 - Share each review phase deadline with API retries and request timeouts.
+- Invalidate prior review status and request verification after a base retarget.
 
 ## [0.4.1] - 2026-08-19
 

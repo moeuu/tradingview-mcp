@@ -44,9 +44,9 @@ token and requires no personal access token or extra secret. The gate runs only
 trusted code from the default branch and never checks out or executes pull
 request code with its scoped token.
 
-The gate runs when a pull request is opened, marked ready for review, or receives
-a new commit. After retargeting an existing pull request to `main`, push a new
-commit so Codex reviews the new base diff and publishes a current status.
+The gate runs when a pull request is opened, marked ready for review, receives a
+new commit, or is retargeted to `main`. A base retarget immediately invalidates
+the previous status and requests a commit-bound review of the new diff.
 
 Repository text must use English and ASCII characters only. This includes
 source strings, tests, documentation, examples, issue templates, and
