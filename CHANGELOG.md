@@ -9,8 +9,8 @@ Versioning.
 
 ### Fixed
 
-- Route Codex review requests through a trusted `workflow_run` so Dependabot
-  and fork pull requests can use the gate without a personal access token.
+- Observe repository-managed automatic Codex reviews directly so the gate
+  needs no comment write permission, personal access token, or extra secret.
 
 ## [0.4.1] - 2026-08-19
 

@@ -36,11 +36,11 @@ inline comments when it has suggestions and reacts to the pull request with a
 thumbs-up when it has none. Resolve every review thread before merging. A new
 commit invalidates the previous result and requests another Codex review.
 
-The review trigger is read-only, including for Dependabot and fork pull
-requests. A separate `workflow_run` gate receives the narrowly scoped write
-permissions needed to request a review and publish its commit status. The gate
-runs only trusted code from the default branch and never checks out or executes
-pull request code with its write-scoped token.
+Repository Codex settings request an automatic review for every push. The gate
+observes that review and publishes only its commit-specific status; it does not
+post comments or require a personal access token. It runs only trusted code
+from the default branch and never checks out or executes pull request code with
+its status-scoped token.
 
 Repository text must use English and ASCII characters only. This includes
 source strings, tests, documentation, examples, issue templates, and
