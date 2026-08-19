@@ -35,6 +35,12 @@ describe("Codex review gate", () => {
     expect(gate).toContain("pull-requests: write");
     expect(gate).toContain("statuses: write");
     expect(gate).toContain("github.event.pull_request.updated_at");
+    const gateScript = readFileSync(
+      `${REPOSITORY_ROOT}/scripts/codex-review-gate.mjs`,
+      "utf8",
+    );
+    expect(gateScript).toContain("AbortSignal.timeout(requestBudgetMs)");
+    expect(gateScript).toContain("setApiDeadline(verificationDeadline)");
   });
 
   it("tracks the commit-bound verification request lifecycle", () => {

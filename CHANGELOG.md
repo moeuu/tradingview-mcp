@@ -16,6 +16,7 @@ Versioning.
   reactions that could belong to an older in-flight review.
 - Reserve a complete verification window after an automatic clean review.
 - Keep the workflow timeout longer than both bounded review phases combined.
+- Share each review phase deadline with API retries and request timeouts.
 
 ## [0.4.1] - 2026-08-19
 

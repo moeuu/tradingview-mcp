@@ -4,6 +4,9 @@ export const CODEX_BOT_LOGIN = "chatgpt-codex-connector[bot]";
 export const CODEX_STATUS_CONTEXT = "codex-review";
 export const GITHUB_ACTIONS_BOT_LOGIN = "github-actions[bot]";
 const GITHUB_RETRY_BUDGET_MS = 30 * 60 * 1_000;
+const GITHUB_REQUEST_TIMEOUT_MS = 30_000;
+const STATUS_REPORT_TIMEOUT_MS = 2 * 60 * 1_000;
+let apiDeadlineMs = Number.POSITIVE_INFINITY;
 
 export function detectCodexCompletion({
   reviews,
@@ -108,13 +111,19 @@ export function githubRetryAfterMs(value) {
 async function githubJson(apiPath, options = {}) {
   const method = options.method ?? "GET";
   const attempts = method === "GET" || options.retryTransient === true ? 4 : 1;
-  const retryDeadline = Date.now() + GITHUB_RETRY_BUDGET_MS;
+  const retryDeadline = Math.min(Date.now() + GITHUB_RETRY_BUDGET_MS, apiDeadlineMs);
   let lastStatus;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const requestBudgetMs = Math.min(
+      GITHUB_REQUEST_TIMEOUT_MS,
+      retryDeadline - Date.now(),
+    );
+    if (requestBudgetMs <= 0) break;
     let response;
     try {
       response = await fetch(`https://api.github.com${apiPath}`, {
         method,
+        signal: AbortSignal.timeout(requestBudgetMs),
         headers: {
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${requiredEnvironment("GITHUB_TOKEN")}`,
@@ -124,7 +133,9 @@ async function githubJson(apiPath, options = {}) {
       });
     } catch (error) {
       if (attempt + 1 >= attempts) throw error;
-      await delay(retryDelayMs(attempt));
+      const retryDelay = retryDelayMs(attempt);
+      if (retryDelay >= retryDeadline - Date.now()) throw error;
+      await delay(retryDelay);
       continue;
     }
     if (response.ok) {
@@ -135,7 +146,7 @@ async function githubJson(apiPath, options = {}) {
     if (!retryableGithubStatus(response.status) || attempt + 1 >= attempts) break;
     const retryAfterMs = githubRetryAfterMs(response.headers.get("retry-after"));
     const retryDelay = retryAfterMs ?? retryDelayMs(attempt);
-    if (retryDelay > retryDeadline - Date.now()) break;
+    if (retryDelay >= retryDeadline - Date.now()) break;
     await delay(retryDelay);
   }
   throw new Error(`GitHub API ${method} ${apiPath} failed with status ${lastStatus ?? "unknown"}.`);
@@ -222,6 +233,16 @@ async function main() {
     "PR_EVENT_AT",
   );
 
+  const timeoutMs = positiveInteger(
+    process.env.CODEX_REVIEW_TIMEOUT_MS ?? "1800000",
+    "CODEX_REVIEW_TIMEOUT_MS",
+  );
+  const pollMs = positiveInteger(
+    process.env.CODEX_REVIEW_POLL_MS ?? "15000",
+    "CODEX_REVIEW_POLL_MS",
+  );
+  const deadline = Date.now() + timeoutMs;
+  setApiDeadline(deadline);
   await setStatus(repository, headSha, "pending", "Waiting for Codex review on this commit");
   try {
     let completion = await readCompletion(
@@ -231,15 +252,6 @@ async function main() {
       reviewTriggeredAt,
     );
 
-    const timeoutMs = positiveInteger(
-      process.env.CODEX_REVIEW_TIMEOUT_MS ?? "1800000",
-      "CODEX_REVIEW_TIMEOUT_MS",
-    );
-    const pollMs = positiveInteger(
-      process.env.CODEX_REVIEW_POLL_MS ?? "15000",
-      "CODEX_REVIEW_POLL_MS",
-    );
-    const deadline = Date.now() + timeoutMs;
     while (
       !completion.complete &&
       completion.outcome !== "verification-required" &&
@@ -254,12 +266,13 @@ async function main() {
       );
     }
     if (completion.outcome === "verification-required") {
+      const verificationDeadline = Date.now() + timeoutMs;
+      setApiDeadline(verificationDeadline);
       const request = await createReviewRequest(repository, pullNumber, headSha);
       let snapshot = await readRequestedCompletion(repository, pullNumber, headSha, request);
       let requestAcknowledged = snapshot.requestState.acknowledged;
       let settledSamples = 0;
       completion = { complete: false, outcome: "pending", completedAt: null };
-      const verificationDeadline = Date.now() + timeoutMs;
       while (!completion.complete && Date.now() < verificationDeadline) {
         requestAcknowledged ||= snapshot.requestState.acknowledged;
         settledSamples = requestAcknowledged && !snapshot.requestState.inProgress
@@ -277,9 +290,11 @@ async function main() {
     const description = completion.outcome === "review"
       ? "Codex review completed for this commit"
       : "Codex completed with no suggestions";
+    setApiDeadline(Date.now() + STATUS_REPORT_TIMEOUT_MS);
     await setStatus(repository, headSha, "success", description);
     process.stdout.write(`${description}.\n`);
   } catch (error) {
+    setApiDeadline(Date.now() + STATUS_REPORT_TIMEOUT_MS);
     await setStatus(repository, headSha, "failure", "Codex review did not complete").catch(
       () => undefined,
     );
@@ -298,6 +313,10 @@ function reviewRequest(value) {
     throw new Error("The Codex verification request comment response was incomplete.");
   }
   return { id: value.id, createdAt: value.created_at };
+}
+
+function setApiDeadline(deadlineMs) {
+  apiDeadlineMs = deadlineMs;
 }
 
 function retryDelayMs(attempt) {
