@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 export const CODEX_BOT_LOGIN = "chatgpt-codex-connector[bot]";
 export const CODEX_STATUS_CONTEXT = "codex-review";
+export const GITHUB_ACTIONS_BOT_LOGIN = "github-actions[bot]";
 
 export function detectCodexCompletion({
   reviews,
@@ -45,6 +46,14 @@ export function detectCodexCompletion({
 
 export function retryableGithubStatus(status) {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+export function isTrustedReviewRequestComment(comment, marker) {
+  return (
+    comment?.user?.login === GITHUB_ACTIONS_BOT_LOGIN &&
+    typeof comment.body === "string" &&
+    comment.body.includes(marker)
+  );
 }
 
 async function githubJson(apiPath, options = {}) {
@@ -112,8 +121,8 @@ async function setStatus(repository, headSha, state, description) {
 async function ensureReviewRequest(repository, pullNumber, headSha) {
   const marker = `<!-- codex-review-gate:${headSha} -->`;
   const comments = await githubPages(`/repos/${repository}/issues/${pullNumber}/comments`);
-  const existing = comments.find(
-    (comment) => typeof comment.body === "string" && comment.body.includes(marker),
+  const existing = comments.find((comment) =>
+    isTrustedReviewRequestComment(comment, marker),
   );
   if (existing) {
     return reviewRequest(existing);
@@ -180,6 +189,7 @@ async function main() {
 function reviewRequest(value) {
   if (
     !value ||
+    value?.user?.login !== GITHUB_ACTIONS_BOT_LOGIN ||
     !Number.isSafeInteger(value.id) ||
     typeof value.created_at !== "string" ||
     !Number.isFinite(Date.parse(value.created_at))

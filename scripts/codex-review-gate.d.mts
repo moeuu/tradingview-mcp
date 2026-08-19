@@ -1,5 +1,6 @@
 export const CODEX_BOT_LOGIN: string;
 export const CODEX_STATUS_CONTEXT: string;
+export const GITHUB_ACTIONS_BOT_LOGIN: string;
 
 interface CodexReviewGateInput {
   reviews: Array<{
@@ -27,3 +28,11 @@ export function detectCodexCompletion(
 ): CodexReviewGateResult;
 
 export function retryableGithubStatus(status: number): boolean;
+
+export function isTrustedReviewRequestComment(
+  comment: {
+    user?: { login?: string | undefined } | undefined;
+    body?: string | undefined;
+  },
+  marker: string,
+): boolean;

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   CODEX_BOT_LOGIN,
+  GITHUB_ACTIONS_BOT_LOGIN,
   detectCodexCompletion,
+  isTrustedReviewRequestComment,
   retryableGithubStatus,
 } from "../scripts/codex-review-gate.mjs";
 
@@ -10,6 +12,30 @@ const HEAD_SHA = "0123456789abcdef0123456789abcdef01234567";
 const REVIEW_REQUESTED_AT = "2026-08-19T08:00:00Z";
 
 describe("Codex review gate", () => {
+  it("pins the trusted identities used by the gate", () => {
+    expect(CODEX_BOT_LOGIN).toBe("chatgpt-codex-connector[bot]");
+    expect(GITHUB_ACTIONS_BOT_LOGIN).toBe("github-actions[bot]");
+  });
+
+  it("accepts only a GitHub Actions marker comment", () => {
+    const marker = "<!-- codex-review-gate:head-sha -->";
+    expect(
+      isTrustedReviewRequestComment(
+        {
+          user: { login: GITHUB_ACTIONS_BOT_LOGIN },
+          body: `@codex review\n\n${marker}`,
+        },
+        marker,
+      ),
+    ).toBe(true);
+    expect(
+      isTrustedReviewRequestComment(
+        { user: { login: "contributor" }, body: marker },
+        marker,
+      ),
+    ).toBe(false);
+  });
+
   it("accepts a submitted Codex review only for the current head", () => {
     const result = detectCodexCompletion({
       headSha: HEAD_SHA,
