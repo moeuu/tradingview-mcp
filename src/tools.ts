@@ -6,6 +6,7 @@ import { normalizeBar, parseBarTime } from "./domain.js";
 import { generateDemoBars } from "./demo.js";
 import { extractBars } from "./market-service.js";
 import type { AppRuntime } from "./runtime.js";
+import { buildTradingViewDayContext, tradingViewLookbackRange } from "./tradingview-day.js";
 import {
   BarsInputSchema,
   CustomSeriesInputSchema,
@@ -20,7 +21,9 @@ import {
   SearchInputSchema,
   SnapshotInputSchema,
   TechnicalAnalysisInputSchema,
+  TradingViewDayInputSchema,
   TradingViewHistoryInputSchema,
+  TradingViewPeriodScreenshotInputSchema,
   ViewInputSchema,
   ZoneInputSchema,
 } from "./schemas.js";
@@ -105,7 +108,12 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
         screenshots: { enabled: runtime.config.screenshotsEnabled, startsOnDemand: true },
         currentChart: runtime.store.getSummary(),
         recommendedTools: runtime.tradingViewBrowser.enabled
-          ? ["tradingview_analyze_symbol", "tradingview_get_history"]
+          ? [
+              "tradingview_get_day",
+              "tradingview_capture_period",
+              "tradingview_analyze_symbol",
+              "tradingview_get_history",
+            ]
           : ["chart_import_csv", "chart_set_data", "chart_analyze"],
       }),
   );
@@ -653,6 +661,53 @@ export function registerTools(server: McpServer, runtime: AppRuntime): void {
   );
 
   server.registerTool(
+    "tradingview_get_day",
+    {
+      title: "Get comprehensive TradingView data for one date",
+      description:
+        "Recommended one-call historical-date workflow. Navigate official TradingView Supercharts to the requested date, export OHLCV through the chart UI, and return the matching session or intraday aggregate, prior/next bars when available, price changes, gaps, ranges, volume, rolling performance, and deterministic technical analysis. Non-trading days return an explicit no_session_bar status instead of substituting another date.",
+      inputSchema: TradingViewDayInputSchema.shape,
+      annotations: upstreamWrite,
+    },
+    async (raw: unknown) => {
+      const input = TradingViewDayInputSchema.parse(raw);
+      return jsonResult(await getTradingViewDayForMcp(runtime.tradingViewBrowser, input));
+    },
+  );
+
+  server.registerTool(
+    "tradingview_capture_period",
+    {
+      title: "Capture a TradingView chart for an exact date range",
+      description:
+        "Open an official TradingView symbol and interval, use the Supercharts Custom range control for the requested YYYY-MM-DD dates, and return the resulting chart as a PNG in one call. The browser closes by default and authentication remains local.",
+      inputSchema: TradingViewPeriodScreenshotInputSchema.shape,
+      annotations: upstreamRead,
+    },
+    async (raw: unknown) => {
+      const input = TradingViewPeriodScreenshotInputSchema.parse(raw);
+      const capture = await captureTradingViewPeriodForMcp(
+        runtime.tradingViewBrowser,
+        input,
+      );
+      const { png, ...metadata } = capture;
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `TradingView chart capture for ${metadata.state.symbol} ${metadata.state.interval}, ${metadata.requestedRange.from} through ${metadata.requestedRange.to}.`,
+          },
+          { type: "image" as const, data: png.toString("base64"), mimeType: "image/png" },
+        ],
+        structuredContent: {
+          ...metadata,
+          image: { mimeType: "image/png", bytes: png.byteLength },
+        },
+      };
+    },
+  );
+
+  server.registerTool(
     "tradingview_open_chart",
     {
       title: "Open TradingView Supercharts",
@@ -800,6 +855,43 @@ export async function analyzeTradingViewSymbolForMcp(
       history: historyResult(history, includeHistoryBars),
       analysis: analyzeCurrent(),
     };
+  } finally {
+    if (!keepBrowserOpen) await browser.close();
+  }
+}
+
+export async function getTradingViewDayForMcp(
+  browser: Pick<AppRuntime["tradingViewBrowser"], "close" | "getDateRangeHistory">,
+  input: z.infer<typeof TradingViewDayInputSchema>,
+) {
+  const {
+    date,
+    timezone,
+    lookbackBars,
+    includeBars,
+    keepBrowserOpen,
+    ...chartInput
+  } = input;
+  const requestedRange = tradingViewLookbackRange(date, chartInput.interval, lookbackBars);
+  try {
+    const history = await browser.getDateRangeHistory({
+      ...chartInput,
+      ...requestedRange,
+      bars: lookbackBars,
+    });
+    return buildTradingViewDayContext(history, { date, timezone, includeBars });
+  } finally {
+    if (!keepBrowserOpen) await browser.close();
+  }
+}
+
+export async function captureTradingViewPeriodForMcp(
+  browser: Pick<AppRuntime["tradingViewBrowser"], "capturePeriod" | "close">,
+  input: z.infer<typeof TradingViewPeriodScreenshotInputSchema>,
+) {
+  const { keepBrowserOpen, ...captureInput } = input;
+  try {
+    return await browser.capturePeriod(captureInput);
   } finally {
     if (!keepBrowserOpen) await browser.close();
   }

@@ -22,6 +22,22 @@ Authentication values are never accepted through MCP or REST arguments, returned
 
 ## MCP workflow
 
+For an exact official chart screenshot without separate open, navigate, and capture calls:
+
+```text
+tradingview_capture_period({symbol:"NASDAQ:AAPL", interval:"D", from:"2024-01-02", to:"2024-03-28"})
+```
+
+This operates TradingView's documented [Custom range control](https://www.tradingview.com/support/solutions/43000482911-how-to-go-to-the-specific-date-on-the-chart/) and returns the chart PNG as MCP image content. `from` and `to` are validated `YYYY-MM-DD` dates. The response reports the active chart timezone because the TradingView UI interprets calendar boundaries in that timezone.
+
+For comprehensive data on one historical date:
+
+```text
+tradingview_get_day({symbol:"NASDAQ:AAPL", date:"2024-01-03", interval:"D", timezone:"America/New_York"})
+```
+
+This uses a bounded Custom range followed by TradingView's documented [chart-data export](https://www.tradingview.com/support/solutions/43000537255-how-to-export-chart-data/). It returns official OHLCV, session aggregation, previous/next bars when loaded, price changes, gaps, range, volume, 5/20/50/200-period performance, deterministic analysis through that date, and every additional indicator column present in the export. `timezone` controls bar-to-calendar-date assignment and must be an IANA timezone. A non-trading or unavailable date returns `status:"no_session_bar"` and does not substitute the nearest bar. Set `includeBars:true` for the individual bars of an intraday date.
+
 For deterministic OHLCV retrieval, use the atomic operation:
 
 ```text
@@ -127,6 +143,7 @@ and no upgrade action is attempted. One-minute history remains available through
 `timeframe=1`.
 
 - TradingView account-plan, exchange entitlement, export availability, and delayed/live status remain authoritative.
+- Date-range navigation uses TradingView's documented Custom range UI; results report the active chart timezone and requested range.
 - A session with chart-data export entitlement is required; an anonymous Basic session can open the export dialog but cannot download its CSV.
 - The browser uses the English TradingView origin and `en-US` browser locale. UI changes can require selector maintenance.
 - Exports are capped at 50 MB and saved below `MARKET_CHART_DATA_ROOT/tradingview-exports`.

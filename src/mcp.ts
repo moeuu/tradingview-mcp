@@ -6,12 +6,12 @@ import { createRuntime } from "./runtime.js";
 import { registerTools } from "./tools.js";
 
 const INSTRUCTIONS =
-  "Use market_get_capabilities when provider availability is unclear. Prefer tradingview_analyze_symbol for official history plus deterministic analysis; use tradingview_get_history for history only. Viewer and browsers start on demand. High-level TradingView tools close the browser by default; call tradingview_close after interactive work. Report source, interval, authentication, and delayed status. Data may be delayed or inaccurate; this is not investment advice.";
+  "Use market_get_capabilities when provider availability is unclear. Use tradingview_get_day for a symbol on a specific historical date and tradingview_capture_period for a date-range screenshot. Prefer tradingview_analyze_symbol for recent official history plus deterministic analysis; use tradingview_get_history for history only. Viewer and browsers start on demand. High-level TradingView tools close the browser by default; call tradingview_close after interactive work. Report source, interval, timezone, authentication, and delayed status. Data may be delayed or inaccurate; this is not investment advice.";
 
 export async function startMcpServer(): Promise<void> {
   const runtime = await createRuntime();
   const server = new McpServer(
-    { name: "tradingview-mcp", version: "0.3.0" },
+    { name: "tradingview-mcp", version: "0.4.0" },
     { instructions: INSTRUCTIONS, capabilities: { logging: {} } },
   );
   registerTools(server, runtime);

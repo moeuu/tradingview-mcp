@@ -17,7 +17,8 @@ import type { Browser, BrowserContext, Cookie, Locator, Page } from "playwright"
 import type { ChartStore } from "./chart-store.js";
 import type { AppConfig } from "./config.js";
 import { DEFAULT_TRADINGVIEW_AUTH_COOKIE_NAMES } from "./auth-policy.js";
-import { loadBarsFromCsv } from "./csv.js";
+import { loadBarsFromCsv, loadBarsWithFieldsFromCsv } from "./csv.js";
+import type { CsvBarWithFields } from "./csv.js";
 import type { Bar } from "./domain.js";
 import { MAX_BARS } from "./domain.js";
 import {
@@ -201,6 +202,20 @@ export interface TradingViewHistoryInput {
   outputName?: string | undefined;
 }
 
+export interface TradingViewDateRangeInput {
+  symbol: string;
+  interval: string;
+  from: string;
+  to: string;
+  layoutId?: string | undefined;
+}
+
+export interface TradingViewDateRangeHistoryInput extends TradingViewDateRangeInput {
+  bars?: number | undefined;
+  loadChart?: boolean | undefined;
+  outputName?: string | undefined;
+}
+
 export interface TradingViewHistoryResult {
   symbol: string;
   interval: string;
@@ -218,6 +233,22 @@ export interface TradingViewHistoryResult {
   lastBar: Bar;
   bars: Bar[];
   chart?: ReturnType<ChartStore["getSummary"]> | undefined;
+}
+
+export interface TradingViewDateRangeHistoryResult extends TradingViewHistoryResult {
+  requestedRange: { from: string; to: string };
+  chartTimezone: string | null;
+  exportRows: CsvBarWithFields[];
+}
+
+export interface TradingViewPeriodCaptureResult {
+  png: Buffer;
+  state: TradingViewChartState;
+  requestedRange: { from: string; to: string };
+  chartTimezone: string | null;
+  width: number;
+  height: number;
+  chartOnly: boolean;
 }
 
 interface ArchivedExport {
@@ -297,6 +328,22 @@ export class TradingViewBrowserService {
 
   async getHistory(input: TradingViewHistoryInput): Promise<TradingViewHistoryResult> {
     return this.#runExclusive(() => this.#getHistory(input));
+  }
+
+  async getDateRangeHistory(
+    input: TradingViewDateRangeHistoryInput,
+  ): Promise<TradingViewDateRangeHistoryResult> {
+    return this.#runExclusive(() => this.#getDateRangeHistory(input));
+  }
+
+  async capturePeriod(
+    input: TradingViewDateRangeInput & {
+      width?: number | undefined;
+      height?: number | undefined;
+      chartOnly?: boolean | undefined;
+    },
+  ): Promise<TradingViewPeriodCaptureResult> {
+    return this.#runExclusive(() => this.#capturePeriod(input));
   }
 
   async captureBatch(input: TradingViewCaptureBatchInput): Promise<TradingViewCaptureBatchManifest> {
@@ -604,7 +651,16 @@ export class TradingViewBrowserService {
     await this.#waitForChart(page);
     this.#symbol = symbol.toUpperCase();
     this.#interval = interval.toUpperCase();
-    await this.#waitForRequestedSymbol(page, this.#symbol);
+    try {
+      await this.#waitForRequestedSymbol(page, this.#symbol);
+    } catch {
+      await page.goto(target.toString(), {
+        waitUntil: "domcontentloaded",
+        timeout: this.config.timeoutMs,
+      });
+      await this.#waitForChart(page);
+      await this.#waitForRequestedSymbol(page, this.#symbol);
+    }
     if (/^\d+S$/i.test(this.#interval)) {
       await this.#selectSecondsInterval(page, this.#interval);
     }
@@ -753,6 +809,96 @@ export class TradingViewBrowserService {
     };
   }
 
+  async #capturePeriod(
+    input: TradingViewDateRangeInput & {
+      width?: number | undefined;
+      height?: number | undefined;
+      chartOnly?: boolean | undefined;
+    },
+  ): Promise<TradingViewPeriodCaptureResult> {
+    const from = validateDateOnly(input.from, "from");
+    const to = validateDateOnly(input.to, "to");
+    assertChronologicalRange(from, to);
+    const width = boundedInteger(input.width ?? 1_440, "width", 640, 2_560);
+    const height = boundedInteger(input.height ?? 900, "height", 480, 1_800);
+    const chartOnly = input.chartOnly ?? true;
+
+    await this.#openChart(input);
+    await this.#selectDateRange(from, to);
+    await this.#assertChartUsable();
+    const [png, state, chartTimezone] = await Promise.all([
+      this.#snapshot({ width, height, chartOnly }),
+      this.#getState(),
+      this.#getChartTimezone(),
+    ]);
+    return {
+      png,
+      state,
+      requestedRange: { from, to },
+      chartTimezone,
+      width,
+      height,
+      chartOnly,
+    };
+  }
+
+  async #getDateRangeHistory(
+    input: TradingViewDateRangeHistoryInput,
+  ): Promise<TradingViewDateRangeHistoryResult> {
+    const requestedBars = boundedInteger(input.bars ?? 1_000, "bars", 1, MAX_BARS);
+    const from = validateDateOnly(input.from, "from");
+    const to = validateDateOnly(input.to, "to");
+    assertChronologicalRange(from, to);
+    const state = await this.#openChart(input);
+    await this.#selectDateRange(from, to);
+    await this.#assertChartUsable();
+    const archived = await this.#downloadChartData(input.outputName);
+    const exported = await loadBarsWithFieldsFromCsv(archived.file, this.dataRoot, {
+      maximumBytes: MAX_EXPORT_BYTES,
+      tailBars: MAX_BARS,
+    });
+    const startBoundary = Date.parse(`${from}T00:00:00.000Z`) - 2 * 86_400_000;
+    const endBoundary = Date.parse(`${to}T00:00:00.000Z`) + 2 * 86_400_000;
+    const rangeRows = exported.rows.filter((row) => {
+      const milliseconds = row.bar.time * 1_000;
+      return milliseconds >= startBoundary && milliseconds <= endBoundary;
+    });
+    const retainedRows = rangeRows.slice(-requestedBars);
+    const bars = retainedRows.map((row) => row.bar);
+    if (bars.length === 0) {
+      throw new Error("TradingView export contained no OHLCV bars near the requested date range.");
+    }
+    const chart = input.loadChart
+      ? this.store.setBars({
+          bars,
+          symbol: state.symbol,
+          interval: state.interval,
+          source: `TradingView Supercharts export:${path.basename(archived.target)}`,
+        })
+      : undefined;
+    return {
+      symbol: state.symbol,
+      interval: state.interval,
+      source: "TradingView Supercharts chart-data export",
+      authenticated: state.authenticated,
+      delayed: state.delayed,
+      requestedBars,
+      requestedBarsSatisfied: rangeRows.length >= requestedBars,
+      barCount: bars.length,
+      sourceBarCount: exported.sourceBarCount,
+      truncated: exported.truncated || rangeRows.length > retainedRows.length,
+      file: archived.file,
+      bytes: archived.bytes,
+      firstBar: bars[0]!,
+      lastBar: bars.at(-1)!,
+      bars,
+      requestedRange: { from, to },
+      chartTimezone: await this.#getChartTimezone(),
+      exportRows: retainedRows,
+      ...(chart ? { chart: this.store.getSummary() } : {}),
+    };
+  }
+
   async #getHistory(input: TradingViewHistoryInput): Promise<TradingViewHistoryResult> {
     const requestedBars = boundedInteger(input.bars ?? 1_000, "bars", 1, MAX_BARS);
     const state = await this.#openChart(input);
@@ -825,6 +971,38 @@ export class TradingViewBrowserService {
       await page.waitForTimeout(400);
     }
     await page.waitForTimeout(750);
+  }
+
+  async #selectDateRange(from: string, to: string): Promise<void> {
+    const page = this.#requirePage();
+    await this.#dismissTransientDialogs(page);
+    const goToButton = page.locator('button[data-name="go-to-date"]').first();
+    await goToButton.click({ timeout: this.config.timeoutMs });
+    const dialog = page.getByRole("dialog").filter({ hasText: /^Go to/i }).first();
+    await dialog.waitFor({ state: "visible", timeout: this.config.timeoutMs });
+    await dialog.getByRole("tab", { name: /^Custom range$/i }).click({
+      timeout: this.config.timeoutMs,
+      force: true,
+    });
+    const startInput = dialog.locator('input[name="start-date-range"]');
+    const endInput = dialog.locator('input[name="end-date-range"]');
+    await startInput.fill(from);
+    await endInput.fill(to);
+    await dialog.locator('button[data-name="submit-button"]').click({
+      timeout: this.config.timeoutMs,
+      force: true,
+    });
+    await dialog.waitFor({ state: "hidden", timeout: this.config.timeoutMs });
+    await this.#waitForChart(page);
+    await page.waitForTimeout(1_000);
+  }
+
+  async #getChartTimezone(): Promise<string | null> {
+    const page = this.#requirePage();
+    const timezone = page.locator('button[data-name="time-zone-menu"]').first();
+    if ((await timezone.count()) === 0) return null;
+    const text = (await timezone.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+    return text || null;
   }
 
   async #downloadChartData(outputName: string | undefined): Promise<ArchivedExport> {
@@ -3777,6 +3955,22 @@ function validateLayoutId(value: string): string {
   const cleaned = value.trim();
   if (!LAYOUT_PATTERN.test(cleaned)) throw new Error("Invalid TradingView layout id.");
   return cleaned;
+}
+
+function validateDateOnly(value: string, name: string): string {
+  const cleaned = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
+    throw new Error(`${name} must use YYYY-MM-DD format.`);
+  }
+  const parsed = new Date(`${cleaned}T00:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== cleaned) {
+    throw new Error(`${name} must be a real calendar date.`);
+  }
+  return cleaned;
+}
+
+function assertChronologicalRange(from: string, to: string): void {
+  if (from > to) throw new Error("The end date must be on or after the start date.");
 }
 
 function validateExportName(value: string): string {
