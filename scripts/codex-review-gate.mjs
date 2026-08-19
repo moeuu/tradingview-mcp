@@ -2,6 +2,11 @@ import { pathToFileURL } from "node:url";
 
 export const CODEX_BOT_LOGIN = "chatgpt-codex-connector[bot]";
 export const CODEX_STATUS_CONTEXT = "codex-review";
+const TRUSTED_REVIEW_REQUEST_ASSOCIATIONS = new Set([
+  "COLLABORATOR",
+  "MEMBER",
+  "OWNER",
+]);
 const GITHUB_RETRY_BUDGET_MS = 30 * 60 * 1_000;
 const GITHUB_REQUEST_TIMEOUT_MS = 30_000;
 const STATUS_REPORT_TIMEOUT_MS = 2 * 60 * 1_000;
@@ -11,6 +16,7 @@ export function detectCodexCompletion({
   reviews,
   reviewSummaryComments = [],
   pullRequestReactions = [],
+  reviewRequestComments = [],
   headSha,
   reviewTriggeredAt,
 }) {
@@ -21,7 +27,7 @@ export function detectCodexCompletion({
       item.content === "eyes" &&
       typeof item.created_at === "string" &&
       Number.isFinite(reviewTriggeredMs) &&
-      Date.parse(item.created_at) >= reviewTriggeredMs,
+      Date.parse(item.created_at) > reviewTriggeredMs,
   );
   const review = reviews.find(
     (item) =>
@@ -62,13 +68,43 @@ export function detectCodexCompletion({
     };
   }
 
+  let manualCleanReaction;
+  for (const item of reviewRequestComments) {
+    if (
+      !TRUSTED_REVIEW_REQUEST_ASSOCIATIONS.has(item?.author_association) ||
+      typeof item.body !== "string" ||
+      !/(?:^|\s)@codex\s+review\b/i.test(item.body) ||
+      typeof item.created_at !== "string" ||
+      !Number.isFinite(reviewTriggeredMs) ||
+      Date.parse(item.created_at) <= reviewTriggeredMs ||
+      !Array.isArray(item.reactions)
+    ) continue;
+    const requestCreatedMs = Date.parse(item.created_at);
+    manualCleanReaction = item.reactions.find(
+      (reaction) =>
+        reaction?.user?.login === CODEX_BOT_LOGIN &&
+        reaction.content === "+1" &&
+        typeof reaction.created_at === "string" &&
+        Date.parse(reaction.created_at) >= requestCreatedMs,
+    );
+    if (manualCleanReaction) break;
+  }
+  if (manualCleanReaction) {
+    return {
+      complete: true,
+      outcome: "no-suggestions",
+      completedAt: manualCleanReaction.created_at,
+      acknowledged: acknowledgement !== undefined,
+    };
+  }
+
   const reaction = pullRequestReactions.find(
     (item) =>
       item?.user?.login === CODEX_BOT_LOGIN &&
       item.content === "+1" &&
       typeof item.created_at === "string" &&
       Number.isFinite(reviewTriggeredMs) &&
-      Date.parse(item.created_at) >= reviewTriggeredMs,
+      Date.parse(item.created_at) > reviewTriggeredMs,
   );
   if (reaction) {
     return {
@@ -183,10 +219,30 @@ async function readCompletion(repository, pullNumber, headSha, reviewTriggeredAt
     ),
     githubPages(`/repos/${repository}/issues/${pullNumber}/reactions`),
   ]);
+  const eligibleReviewRequests = reviewSummaryComments
+    .filter(
+      (item) =>
+        typeof item?.id === "number" &&
+        TRUSTED_REVIEW_REQUEST_ASSOCIATIONS.has(item.author_association) &&
+        typeof item.body === "string" &&
+        /(?:^|\s)@codex\s+review\b/i.test(item.body) &&
+        typeof item.created_at === "string" &&
+        Date.parse(item.created_at) > Date.parse(reviewTriggeredAt),
+    )
+    .slice(-10);
+  const reviewRequestComments = await Promise.all(
+    eligibleReviewRequests.map(async (item) => ({
+      ...item,
+      reactions: await githubPages(
+        `/repos/${repository}/issues/comments/${item.id}/reactions`,
+      ),
+    })),
+  );
   return detectCodexCompletion({
     reviews,
     reviewSummaryComments,
     pullRequestReactions,
+    reviewRequestComments,
     headSha,
     reviewTriggeredAt,
   });

@@ -47,7 +47,9 @@ For a clean automatic review, the gate accepts a thumbs-up only after observing
 a fresh in-progress acknowledgement for the current pull request event and
 confirming the previous head had no pending Codex review. If Codex does not
 acknowledge within two minutes, the pending status asks a maintainer to comment
-`@codex review` while the gate continues waiting for commit-bound evidence.
+`@codex review` while the gate continues waiting. A clean manual result is
+bound to that trusted maintainer comment, while a review with suggestions is
+bound directly to the pull request head commit.
 
 The gate runs when a pull request is opened, marked ready for review, receives a
 new commit, or is retargeted to `main`. A base retarget immediately invalidates

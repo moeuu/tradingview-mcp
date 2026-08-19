@@ -128,6 +128,33 @@ describe("Codex review gate", () => {
     });
   });
 
+  it("rejects an automatic reaction at the pull request event boundary", () => {
+    const result = detectCodexCompletion({
+      headSha: HEAD_SHA,
+      reviewTriggeredAt: REVIEW_TRIGGERED_AT,
+      reviews: [],
+      pullRequestReactions: [
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          content: "+1",
+          created_at: REVIEW_TRIGGERED_AT,
+        },
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          content: "eyes",
+          created_at: "2026-08-19T08:00:10Z",
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      complete: false,
+      outcome: "in-progress",
+      completedAt: "2026-08-19T08:00:10Z",
+      acknowledged: true,
+    });
+  });
+
   it("preserves an acknowledgement observed with a clean reaction", () => {
     const result = detectCodexCompletion({
       headSha: HEAD_SHA,
@@ -174,6 +201,64 @@ describe("Codex review gate", () => {
       outcome: "in-progress",
       completedAt: "2026-08-19T08:00:10Z",
       acknowledged: true,
+    });
+  });
+
+  it("accepts a clean manual review bound to a trusted request comment", () => {
+    const result = detectCodexCompletion({
+      headSha: HEAD_SHA,
+      reviewTriggeredAt: REVIEW_TRIGGERED_AT,
+      reviews: [],
+      reviewRequestComments: [
+        {
+          author_association: "OWNER",
+          body: "@codex review",
+          created_at: "2026-08-19T08:01:00Z",
+          reactions: [
+            {
+              user: { login: CODEX_BOT_LOGIN },
+              content: "+1",
+              created_at: "2026-08-19T08:05:00Z",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      complete: true,
+      outcome: "no-suggestions",
+      completedAt: "2026-08-19T08:05:00Z",
+      acknowledged: false,
+    });
+  });
+
+  it("rejects a clean review request from an untrusted commenter", () => {
+    const result = detectCodexCompletion({
+      headSha: HEAD_SHA,
+      reviewTriggeredAt: REVIEW_TRIGGERED_AT,
+      reviews: [],
+      reviewRequestComments: [
+        {
+          author_association: "NONE",
+          body: "@codex review",
+          created_at: "2026-08-19T08:01:00Z",
+          reactions: [
+            {
+              user: { login: CODEX_BOT_LOGIN },
+              content: "+1",
+              created_at: "2026-08-19T08:05:00Z",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      complete: false,
+      outcome: "pending",
+      completedAt: null,
+      acknowledged: false,
     });
   });
 

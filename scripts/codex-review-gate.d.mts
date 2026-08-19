@@ -17,6 +17,16 @@ interface CodexReviewGateInput {
     content?: string | undefined;
     created_at?: string | undefined;
   }> | undefined;
+  reviewRequestComments?: Array<{
+    author_association?: string | undefined;
+    body?: string | undefined;
+    created_at?: string | undefined;
+    reactions?: Array<{
+      user?: { login?: string | undefined } | undefined;
+      content?: string | undefined;
+      created_at?: string | undefined;
+    }> | undefined;
+  }> | undefined;
   headSha: string;
   reviewTriggeredAt: string;
 }
