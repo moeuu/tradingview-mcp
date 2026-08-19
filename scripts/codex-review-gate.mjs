@@ -8,6 +8,7 @@ const GITHUB_RETRY_BUDGET_MS = 30 * 60 * 1_000;
 export function detectCodexCompletion({
   reviews,
   reviewSummaryComments = [],
+  commitBoundReactions = [],
   pullRequestReactions = [],
   headSha,
   reviewTriggeredAt,
@@ -47,6 +48,22 @@ export function detectCodexCompletion({
       complete: true,
       outcome: "no-suggestions",
       completedAt: summary.created_at,
+    };
+  }
+
+  const commitBoundReaction = commitBoundReactions.find(
+    (item) =>
+      item?.user?.login === CODEX_BOT_LOGIN &&
+      item.content === "+1" &&
+      typeof item.created_at === "string" &&
+      Number.isFinite(reviewTriggeredMs) &&
+      Date.parse(item.created_at) >= reviewTriggeredMs,
+  );
+  if (commitBoundReaction) {
+    return {
+      complete: true,
+      outcome: "no-suggestions",
+      completedAt: commitBoundReaction.created_at,
     };
   }
 
@@ -188,6 +205,7 @@ async function readRequestedCompletion(repository, pullNumber, headSha, request)
     completion: detectCodexCompletion({
       reviews,
       reviewSummaryComments,
+      commitBoundReactions: reviewRequestReactions,
       headSha,
       reviewTriggeredAt: request.createdAt,
     }),
@@ -241,7 +259,8 @@ async function main() {
       let requestAcknowledged = snapshot.requestState.acknowledged;
       let settledSamples = 0;
       completion = { complete: false, outcome: "pending", completedAt: null };
-      while (!completion.complete && Date.now() < deadline) {
+      const verificationDeadline = Date.now() + timeoutMs;
+      while (!completion.complete && Date.now() < verificationDeadline) {
         requestAcknowledged ||= snapshot.requestState.acknowledged;
         settledSamples = requestAcknowledged && !snapshot.requestState.inProgress
           ? settledSamples + 1

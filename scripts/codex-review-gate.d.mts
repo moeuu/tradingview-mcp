@@ -13,6 +13,11 @@ interface CodexReviewGateInput {
     body?: string | undefined;
     created_at?: string | undefined;
   }> | undefined;
+  commitBoundReactions?: Array<{
+    user?: { login?: string | undefined } | undefined;
+    content?: string | undefined;
+    created_at?: string | undefined;
+  }> | undefined;
   pullRequestReactions?: Array<{
     user?: { login?: string | undefined } | undefined;
     content?: string | undefined;

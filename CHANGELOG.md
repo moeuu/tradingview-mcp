@@ -14,6 +14,7 @@ Versioning.
   without a personal access token or extra secret.
 - Accept only commit-bound review evidence and ignore ambiguous pull request
   reactions that could belong to an older in-flight review.
+- Reserve a complete verification window after an automatic clean review.
 
 ## [0.4.1] - 2026-08-19
 

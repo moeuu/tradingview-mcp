@@ -122,6 +122,27 @@ describe("Codex review gate", () => {
     });
   });
 
+  it("accepts a thumbs-up on the head-specific verification request", () => {
+    const result = detectCodexCompletion({
+      headSha: HEAD_SHA,
+      reviewTriggeredAt: REVIEW_TRIGGERED_AT,
+      reviews: [],
+      commitBoundReactions: [
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          content: "+1",
+          created_at: "2026-08-19T08:05:00Z",
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      complete: true,
+      outcome: "no-suggestions",
+      completedAt: "2026-08-19T08:05:00Z",
+    });
+  });
+
   it("accepts a post-event Codex summary naming the current head", () => {
     const result = detectCodexCompletion({
       headSha: HEAD_SHA,
