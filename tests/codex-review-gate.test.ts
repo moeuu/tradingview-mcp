@@ -77,7 +77,12 @@ describe("Codex review gate", () => {
       ],
     });
 
-    expect(result).toEqual({ complete: false, outcome: "pending", completedAt: null });
+    expect(result).toEqual({
+      complete: false,
+      outcome: "pending",
+      completedAt: null,
+      acknowledged: false,
+    });
   });
 
   it("rejects an exact-head review submitted before the pull request event", () => {
@@ -93,7 +98,12 @@ describe("Codex review gate", () => {
       ],
     });
 
-    expect(result).toEqual({ complete: false, outcome: "pending", completedAt: null });
+    expect(result).toEqual({
+      complete: false,
+      outcome: "pending",
+      completedAt: null,
+      acknowledged: false,
+    });
   });
 
   it("keeps an automatic thumbs-up separate from commit-bound evidence", () => {
@@ -114,6 +124,34 @@ describe("Codex review gate", () => {
       complete: false,
       outcome: "clean-reaction",
       completedAt: "2026-08-19T08:05:00Z",
+      acknowledged: false,
+    });
+  });
+
+  it("preserves an acknowledgement observed with a clean reaction", () => {
+    const result = detectCodexCompletion({
+      headSha: HEAD_SHA,
+      reviewTriggeredAt: REVIEW_TRIGGERED_AT,
+      reviews: [],
+      pullRequestReactions: [
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          content: "eyes",
+          created_at: "2026-08-19T08:00:10Z",
+        },
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          content: "+1",
+          created_at: "2026-08-19T08:05:00Z",
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      complete: false,
+      outcome: "clean-reaction",
+      completedAt: "2026-08-19T08:05:00Z",
+      acknowledged: true,
     });
   });
 
@@ -135,6 +173,7 @@ describe("Codex review gate", () => {
       complete: false,
       outcome: "in-progress",
       completedAt: "2026-08-19T08:00:10Z",
+      acknowledged: true,
     });
   });
 
@@ -174,7 +213,12 @@ describe("Codex review gate", () => {
       ],
     });
 
-    expect(result).toEqual({ complete: false, outcome: "pending", completedAt: null });
+    expect(result).toEqual({
+      complete: false,
+      outcome: "pending",
+      completedAt: null,
+      acknowledged: false,
+    });
   });
 
   it("retries only transient GitHub response statuses", () => {

@@ -30,6 +30,7 @@ interface CodexReviewGateResult {
     | "in-progress"
     | "pending";
   completedAt: string | null;
+  acknowledged: boolean;
 }
 
 export function detectCodexCompletion(

@@ -15,6 +15,14 @@ export function detectCodexCompletion({
   reviewTriggeredAt,
 }) {
   const reviewTriggeredMs = Date.parse(reviewTriggeredAt);
+  const acknowledgement = pullRequestReactions.find(
+    (item) =>
+      item?.user?.login === CODEX_BOT_LOGIN &&
+      item.content === "eyes" &&
+      typeof item.created_at === "string" &&
+      Number.isFinite(reviewTriggeredMs) &&
+      Date.parse(item.created_at) >= reviewTriggeredMs,
+  );
   const review = reviews.find(
     (item) =>
       item?.user?.login === CODEX_BOT_LOGIN &&
@@ -28,6 +36,7 @@ export function detectCodexCompletion({
       complete: true,
       outcome: "review",
       completedAt: review.submitted_at,
+      acknowledged: acknowledgement !== undefined,
     };
   }
 
@@ -49,6 +58,7 @@ export function detectCodexCompletion({
       complete: true,
       outcome: "no-suggestions",
       completedAt: summary.created_at,
+      acknowledged: acknowledgement !== undefined,
     };
   }
 
@@ -65,26 +75,25 @@ export function detectCodexCompletion({
       complete: false,
       outcome: "clean-reaction",
       completedAt: reaction.created_at,
+      acknowledged: acknowledgement !== undefined,
     };
   }
 
-  const acknowledgement = pullRequestReactions.find(
-    (item) =>
-      item?.user?.login === CODEX_BOT_LOGIN &&
-      item.content === "eyes" &&
-      typeof item.created_at === "string" &&
-      Number.isFinite(reviewTriggeredMs) &&
-      Date.parse(item.created_at) >= reviewTriggeredMs,
-  );
   if (acknowledgement) {
     return {
       complete: false,
       outcome: "in-progress",
       completedAt: acknowledgement.created_at,
+      acknowledged: true,
     };
   }
 
-  return { complete: false, outcome: "pending", completedAt: null };
+  return {
+    complete: false,
+    outcome: "pending",
+    completedAt: null,
+    acknowledged: false,
+  };
 }
 
 export function retryableGithubStatus(status) {
@@ -229,7 +238,7 @@ async function main() {
       headSha,
       reviewTriggeredAt,
     );
-    let autoAcknowledged = completion.outcome === "in-progress";
+    let autoAcknowledged = completion.acknowledged;
     let manualNoticePublished = false;
 
     while (!completion.complete && Date.now() < deadline) {
@@ -243,6 +252,7 @@ async function main() {
           complete: true,
           outcome: "no-suggestions",
           completedAt: completion.completedAt,
+          acknowledged: true,
         };
         break;
       }
@@ -265,7 +275,7 @@ async function main() {
         headSha,
         reviewTriggeredAt,
       );
-      autoAcknowledged ||= completion.outcome === "in-progress";
+      autoAcknowledged ||= completion.acknowledged;
     }
     if (!completion.complete) {
       throw new Error("Codex did not finish reviewing the current pull request head in time.");
