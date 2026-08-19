@@ -1,5 +1,6 @@
 export const CODEX_BOT_LOGIN: string;
 export const CODEX_STATUS_CONTEXT: string;
+export const GITHUB_ACTIONS_BOT_LOGIN: string;
 
 interface CodexReviewGateInput {
   reviews: Array<{
@@ -12,13 +13,18 @@ interface CodexReviewGateInput {
     body?: string | undefined;
     created_at?: string | undefined;
   }> | undefined;
+  pullRequestReactions?: Array<{
+    user?: { login?: string | undefined } | undefined;
+    content?: string | undefined;
+    created_at?: string | undefined;
+  }> | undefined;
   headSha: string;
   reviewTriggeredAt: string;
 }
 
 interface CodexReviewGateResult {
   complete: boolean;
-  outcome: "review" | "no-suggestions" | "pending";
+  outcome: "review" | "no-suggestions" | "verification-required" | "pending";
   completedAt: string | null;
 }
 
@@ -27,5 +33,12 @@ export function detectCodexCompletion(
 ): CodexReviewGateResult;
 
 export function retryableGithubStatus(status: number): boolean;
+
+export function codexRequestReactionState(
+  reactions: Array<{
+    user?: { login?: string | undefined } | undefined;
+    content?: string | undefined;
+  }>,
+): { acknowledged: boolean; inProgress: boolean };
 
 export function githubRetryAfterMs(value: string | null): number | undefined;

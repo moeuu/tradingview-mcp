@@ -9,8 +9,9 @@ Versioning.
 
 ### Fixed
 
-- Observe repository-managed automatic Codex reviews directly so the gate
-  needs no comment write permission, personal access token, or extra secret.
+- Observe repository-managed automatic Codex reviews directly and use the
+  ephemeral GitHub Actions token for commit-bound clean-review verification,
+  without a personal access token or extra secret.
 - Accept only commit-bound review evidence and ignore ambiguous pull request
   reactions that could belong to an older in-flight review.
 

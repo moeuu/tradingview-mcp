@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   CODEX_BOT_LOGIN,
+  GITHUB_ACTIONS_BOT_LOGIN,
+  codexRequestReactionState,
   detectCodexCompletion,
   githubRetryAfterMs,
   retryableGithubStatus,
@@ -17,9 +19,10 @@ const REPOSITORY_ROOT = fileURLToPath(new URL("..", import.meta.url));
 describe("Codex review gate", () => {
   it("pins the trusted identities used by the gate", () => {
     expect(CODEX_BOT_LOGIN).toBe("chatgpt-codex-connector[bot]");
+    expect(GITHUB_ACTIONS_BOT_LOGIN).toBe("github-actions[bot]");
   });
 
-  it("observes automatic reviews without pull request write access", () => {
+  it("uses only pull request and status scopes for automatic review verification", () => {
     const gate = readFileSync(
       `${REPOSITORY_ROOT}/.github/workflows/codex-review-gate.yml`,
       "utf8",
@@ -28,10 +31,26 @@ describe("Codex review gate", () => {
     expect(gate).toContain("pull_request_target:");
     expect(gate).toContain("types: [opened, ready_for_review, synchronize]");
     expect(gate).not.toContain("issues: write");
-    expect(gate).toContain("pull-requests: read");
-    expect(gate).not.toContain("pull-requests: write");
+    expect(gate).toContain("pull-requests: write");
     expect(gate).toContain("statuses: write");
     expect(gate).toContain("github.event.pull_request.updated_at");
+  });
+
+  it("tracks the commit-bound verification request lifecycle", () => {
+    expect(codexRequestReactionState([])).toEqual({
+      acknowledged: false,
+      inProgress: false,
+    });
+    expect(
+      codexRequestReactionState([
+        { user: { login: CODEX_BOT_LOGIN }, content: "eyes" },
+      ]),
+    ).toEqual({ acknowledged: true, inProgress: true });
+    expect(
+      codexRequestReactionState([
+        { user: { login: CODEX_BOT_LOGIN }, content: "+1" },
+      ]),
+    ).toEqual({ acknowledged: true, inProgress: false });
   });
 
   it("accepts a submitted Codex review only for the current head", () => {
@@ -82,14 +101,25 @@ describe("Codex review gate", () => {
     expect(result).toEqual({ complete: false, outcome: "pending", completedAt: null });
   });
 
-  it("rejects a thumbs-up without commit-bound completion evidence", () => {
+  it("requires commit-bound verification after an automatic thumbs-up", () => {
     const result = detectCodexCompletion({
       headSha: HEAD_SHA,
       reviewTriggeredAt: REVIEW_TRIGGERED_AT,
       reviews: [],
+      pullRequestReactions: [
+        {
+          user: { login: CODEX_BOT_LOGIN },
+          content: "+1",
+          created_at: "2026-08-19T08:05:00Z",
+        },
+      ],
     });
 
-    expect(result).toEqual({ complete: false, outcome: "pending", completedAt: null });
+    expect(result).toEqual({
+      complete: false,
+      outcome: "verification-required",
+      completedAt: "2026-08-19T08:05:00Z",
+    });
   });
 
   it("accepts a post-event Codex summary naming the current head", () => {

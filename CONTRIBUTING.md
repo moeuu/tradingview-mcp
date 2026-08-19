@@ -37,10 +37,12 @@ thumbs-up when it has none. Resolve every review thread before merging. A new
 commit invalidates the previous result and requests another Codex review.
 
 Repository Codex settings request an automatic review for every push. The gate
-observes that review and publishes only its commit-specific status; it does not
-post comments or require a personal access token. It runs only trusted code
-from the default branch and never checks out or executes pull request code with
-its status-scoped token.
+observes that review and publishes its commit-specific status. When a clean
+automatic review produces only an ambiguous pull request reaction, the gate
+requests one commit-bound verification. It uses the ephemeral GitHub Actions
+token and requires no personal access token or extra secret. The gate runs only
+trusted code from the default branch and never checks out or executes pull
+request code with its scoped token.
 
 The gate runs when a pull request is opened, marked ready for review, or receives
 a new commit. After retargeting an existing pull request to `main`, push a new
