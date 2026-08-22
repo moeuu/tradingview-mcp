@@ -7,6 +7,11 @@ Versioning.
 
 ## [Unreleased]
 
+### Removed
+
+- Removed the repository-local Codex review gate in favor of the reusable
+  `wait-for-codex-review` Codex skill.
+
 ## [0.1.0] - 2026-08-19
 
 ### Added
