@@ -67,13 +67,13 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@fastify/static": "^10.1.0",
+    "@fastify/static": "^10.1.4",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "csv-parse": "^7.0.1",
-    "fastify": "^5.10.0",
+    "fastify": "^5.12.5",
     "lightweight-charts": "^5.2.0",
-    "playwright": "^1.61.1",
-    "zod": "^4.4.3"
+    "playwright": "^1.63.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
